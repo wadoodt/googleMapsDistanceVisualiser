@@ -8,8 +8,8 @@
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
-      --brand: #2563eb; --brand2:#059669; --ink:#111827; --muted:#6b7280; --card:#ffffff; --bg:#f3f4f6;
-      --ok:#10b981; --warn:#f59e0b; --err:#ef4444; --violet:#7c3aed;
+      --brand:#2563eb;--brand2:#059669;--ink:#111827;--muted:#6b7280;--card:#fff;--bg:#f3f4f6;
+      --ok:#10b981;--warn:#f59e0b;--err:#ef4444;--violet:#7c3aed;
     }
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;background:var(--bg);padding:20px;color:var(--ink)}
     .container{max-width:1280px;margin:0 auto}
@@ -42,7 +42,7 @@
     .stat-value{font-size:24px;font-weight:800;margin-bottom:4px}
     .stat-label{font-size:13px;color:#6b7280}
     #map{width:100%;height:72vh;border-radius:14px;background:#eef2ff;border:1px solid #e5e7eb}
-    .map-toolbar{display:flex;gap:8px;margin-bottom:12px}
+    .map-toolbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
     .info-box{background:#e8f1ff;border-radius:14px;padding:22px}
     .info-title{font-weight:700;color:#1e3a8a;margin-bottom:10px}
     .location-info{margin-top:4px;font-size:12px;color:#6b7280}
@@ -50,7 +50,6 @@
     @keyframes spin{to{transform:rotate(360deg)}}
     .hidden{display:none}
     .footer{color:#6b7280;font-size:14px;text-align:center;padding:20px}
-    /* Sticky usage bar */
     .usagebar{position:sticky;bottom:0;margin-top:18px;background:#0b1220;color:#e5e7eb;border-radius:12px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 -6px 16px rgba(0,0,0,.08)}
     .usagebar small{color:#93a3b8}
     @media (max-width:640px){.stats-grid{grid-template-columns:1fr}}
@@ -87,7 +86,7 @@
           <button id="saveApiKey" class="btn" type="button">Save Locally</button>
         </div>
         <div class="location-info">
-          Stored locally in your browser. Est. per-call cost uses $0.005 by default (see pricing note below).
+          Stored locally in your browser. Est. per-call cost uses $0.005 by default (see pricing note).
         </div>
       </div>
     </div>
@@ -110,10 +109,10 @@
           <input id="searchAddress" class="form-input" type="text" placeholder="Start typing an address or place…" value="London, UK">
           <button id="searchBtn" class="btn btn-ghost" type="button">📍 Find</button>
         </div>
-        <div id="locationInfo" class="location-info">Current: (51.5074, -0.1278)</div>
+        <div id="locationInfo" class="location-info">Current: —</div>
       </div>
 
-      <!-- Only Road-Aware (radial removed) -->
+      <!-- Time slider -->
       <div class="form-group" style="margin-top:8px">
         <label class="form-label">Time Limit: <span id="timeLimitValue">15</span> minutes</label>
         <input id="timeLimit" class="form-input" type="range" min="5" max="60" value="15" />
@@ -154,6 +153,7 @@
       <div class="map-toolbar">
         <button id="fullscreenBtn" class="btn btn-ghost" type="button">⤢ Fullscreen</button>
         <button id="resetViewBtn" class="btn btn-ghost" type="button">🔄 Reset View</button>
+        <button id="exportBtn" class="btn btn-ghost" type="button">⬇️ Export GeoJSON</button>
       </div>
       <div id="map"></div>
     </div>
@@ -191,7 +191,7 @@
     // -------- State --------
     const state = {
       apiKey: '',
-      mosqueLocation: { lat: 51.5074, lng: -0.1278 },
+      mosqueLocation: { lat: 51.5074, lng: -0.1278 }, // used for initial map center only (no marker)
       searchAddress: 'London, UK',
       isCalculating: false,
       logs: [],
@@ -199,18 +199,17 @@
       apiCalls: 0,
       boundaries: [],
       timeLimit: 15,
-      // Removed user control; 100× old 200 max = 20,000
-      maxApiCalls: 100,
+      maxApiCalls: 100,              // ✅ fixed at 100
       map: null,
       markers: [],
       polygon: null,
       paths: [],
       directionsService: null,
       placesService: null,
-      startingPointMarker: null,
+      startingPointMarker: null,     // no marker until user picks/searches
       autocomplete: null,
-      sessionToken: null, // for Autocomplete (New) semantics
-      estCostPerCall: 0.005 // default; see pricing notes
+      sessionToken: null,
+      estCostPerCall: 0.005
     };
 
     // -------- DOM --------
@@ -234,12 +233,12 @@
       costStat: document.getElementById('costStat'),
       completeStat: document.getElementById('completeStat'),
       calculateBtnContent: document.getElementById('calculateBtnContent'),
-      usageBar: document.getElementById('usageBar'),
       usageCalls: document.getElementById('usageCalls'),
       usagePoints: document.getElementById('usagePoints'),
       usageCost: document.getElementById('usageCost'),
       fullscreenBtn: document.getElementById('fullscreenBtn'),
       resetViewBtn: document.getElementById('resetViewBtn'),
+      exportBtn: document.getElementById('exportBtn'),
       mapDiv: document.getElementById('map')
     };
 
@@ -274,7 +273,10 @@
       else { el.errorBox.classList.add('hidden'); }
     }
     function updateLocationInfo(){
-      el.locationInfo.textContent = `Current: (${state.mosqueLocation.lat.toFixed(4)}, ${state.mosqueLocation.lng.toFixed(4)})`;
+      const hasMarker = !!state.startingPointMarker;
+      el.locationInfo.textContent = hasMarker
+        ? `Current: (${state.mosqueLocation.lat.toFixed(4)}, ${state.mosqueLocation.lng.toFixed(4)})`
+        : 'Current: —';
     }
     function updateStats(){
       const cost = state.apiCalls * state.estCostPerCall;
@@ -293,6 +295,7 @@
     }
     function clearStartingPointMarker(){
       if(state.startingPointMarker){ state.startingPointMarker.setMap(null); state.startingPointMarker=null; }
+      updateLocationInfo();
     }
 
     // -------- Google Maps --------
@@ -312,8 +315,8 @@
       if (state.map) return;
       try{
         state.map = new google.maps.Map(el.mapDiv,{
-          center: state.mosqueLocation,
-          zoom: 11,
+          center: state.mosqueLocation, // just a neutral center; no marker shown
+          zoom: 6,
           fullscreenControl: true,
           streetViewControl: false,
           mapTypeControl: false,
@@ -325,44 +328,44 @@
         state.directionsService = new google.maps.DirectionsService();
         state.placesService = new google.maps.places.PlacesService(state.map);
 
-        // Autocomplete (New) on the search input
+        // Autocomplete
         state.sessionToken = new google.maps.places.AutocompleteSessionToken();
         state.autocomplete = new google.maps.places.Autocomplete(el.searchAddress, {
           fields: ['geometry','name','formatted_address'],
           types: ['geocode']
         });
         state.autocomplete.setOptions({ sessionToken: state.sessionToken });
-        state.autocomplete.addListener('place_changed', () => {
-          const place = state.autocomplete.getPlace();
-          if (!place.geometry || !place.geometry.location) return;
-          const loc = { lat: place.geometry.location.lat(), lng: place.geometry.location.lng() };
-          state.mosqueLocation = loc;
-          updateLocationInfo();
-          addLog(`📍 ${place.formatted_address || place.name}`,'success');
-          if (state.map){
-            state.map.setCenter(loc); state.map.setZoom(12);
-            clearVisualization(); clearStartingPointMarker();
-            state.startingPointMarker = new google.maps.Marker({
-              position: loc, map: state.map, title:'Starting Point',
-              icon:{path:google.maps.SymbolPath.CIRCLE,scale:10,fillColor:'#ef4444',fillOpacity:1,strokeColor:'#fff',strokeWeight:2}
-            });
-          }
-          // new session token for the next search session
-          state.sessionToken = new google.maps.places.AutocompleteSessionToken();
-          state.autocomplete.setOptions({ sessionToken: state.sessionToken });
-        });
-
-        // Initial marker
-        state.startingPointMarker = new google.maps.Marker({
-          position: state.mosqueLocation, map: state.map, title:'Starting Point',
-          icon:{path:google.maps.SymbolPath.CIRCLE,scale:10,fillColor:'#ef4444',fillOpacity:1,strokeColor:'#fff',strokeWeight:2}
-        });
+        state.autocomplete.addListener('place_changed', onPlaceChosen);
 
         addLog('Map initialized','success');
       }catch(err){
         addLog(`Map init error: ${err.message}`,'error');
         setError('Failed to initialize map');
       }
+    }
+
+    function onPlaceChosen(){
+      const place = state.autocomplete.getPlace();
+      if (!place?.geometry?.location) return;
+      const loc = { lat: place.geometry.location.lat(), lng: place.geometry.location.lng() };
+      setStartLocation(loc, place.formatted_address || place.name);
+      // new session token for the next autocomplete session
+      state.sessionToken = new google.maps.places.AutocompleteSessionToken();
+      state.autocomplete.setOptions({ sessionToken: state.sessionToken });
+    }
+
+    function setStartLocation(loc, label='Selected location'){
+      state.mosqueLocation = loc;
+      if (state.map){ state.map.setCenter(loc); state.map.setZoom(12); }
+      clearVisualization();
+      clearStartingPointMarker();
+      // Create the red dot now (only after user picks/searches)
+      state.startingPointMarker = new google.maps.Marker({
+        position: loc, map: state.map, title:'Starting Point',
+        icon:{path:google.maps.SymbolPath.CIRCLE,scale:10,fillColor:'#ef4444',fillOpacity:1,strokeColor:'#fff',strokeWeight:2}
+      });
+      updateLocationInfo();
+      addLog(`📍 ${label}`,'success');
     }
 
     function clearVisualization(){
@@ -382,7 +385,7 @@
       addLog('🔍 Generating test destinations…');
       const dests=[]; const distances=[10,20,30,40]; // km buckets
       const angles=[0,30,60,90,120,150,180,210,240,270,300,330];
-      angles.forEach(a=>distances.forEach(km=>dests.push({location:calculateDestinationPoint(center,a,km),name:`${a}° @ ${km}km`})));
+      angles.forEach(a=>distances.forEach(km=>dests.push({location:calculateDestinationPoint(center,a,km),name:`${a}° @ ${km}km` })));
       addLog(`📍 Generated ${dests.length} destinations`,'success');
       return dests;
     }
@@ -480,12 +483,8 @@
     function visualizeResults(points){
       if(!state.map) return;
       addLog(`🎨 Drawing ${points.length} boundary points`);
-      if(!state.startingPointMarker){
-        state.startingPointMarker = new google.maps.Marker({
-          position: state.mosqueLocation, map: state.map, title:'Starting Point',
-          icon:{path:google.maps.SymbolPath.CIRCLE,scale:10,fillColor:'#ef4444',fillOpacity:1,strokeColor:'#fff',strokeWeight:2}
-        });
-      }
+      // no starting marker creation here (handled in setStartLocation)
+
       points.forEach((p,i)=>{
         const m=new google.maps.Marker({
           position:p,map:state.map,title:`Boundary ${i+1}`,
@@ -512,6 +511,8 @@
 
     async function calculateRoadAwareIsochrone(){
       if(!state.apiKey){ setError('Please enter your Google Maps API key first'); return; }
+      if(!state.startingPointMarker){ setError('Choose a starting location first'); return; }
+
       state.isCalculating = true; setError(''); state.logs=[]; state.apiCalls=0; state.boundaries=[]; clearVisualization(); updateStats();
       addLog(`🚀 Starting ROAD-AWARE calculation for ${state.timeLimit} minutes`);
       el.calculateBtn.disabled = true;
@@ -548,6 +549,66 @@
       el.calculateBtnContent.innerHTML = `⚡ Calculate ${state.timeLimit}-Minute Road Isochrone`;
     }
 
+    // -------- GeoJSON export --------
+    function toGeoJSON(){
+      // Build FeatureCollection with polygon + boundary points
+      const features = [];
+
+      if (state.polygon){
+        const path = state.polygon.getPath().getArray().map(ll => [ll.lng(), ll.lat()]);
+        if (path.length){
+          // close ring
+          const ring = [...path, path[0]];
+          features.push({
+            type: 'Feature',
+            properties: {
+              type: 'isochrone',
+              minutes: state.timeLimit
+            },
+            geometry: {
+              type: 'Polygon',
+              coordinates: [ring]
+            }
+          });
+        }
+      }
+      if (state.boundaries.length){
+        features.push({
+          type:'Feature',
+          properties:{ type: 'boundary-points' },
+          geometry:{
+            type:'MultiPoint',
+            coordinates: state.boundaries.map(p => [p.lng, p.lat])
+          }
+        });
+      }
+      if (state.startingPointMarker){
+        const p = state.mosqueLocation;
+        features.push({
+          type:'Feature',
+          properties:{ type:'origin' },
+          geometry:{ type:'Point', coordinates:[p.lng, p.lat] }
+        });
+      }
+
+      return { type:'FeatureCollection', features };
+    }
+
+    function downloadGeoJSON(){
+      const fc = toGeoJSON();
+      if (!fc.features.length){
+        setError('Nothing to export yet. Run a calculation first.'); return;
+      }
+      const blob = new Blob([JSON.stringify(fc, null, 2)], {type:'application/geo+json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().replace(/[:.]/g,'-');
+      a.href = url; a.download = `isochrone_${state.timeLimit}min_${ts}.geojson`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      addLog('⬇️ GeoJSON exported','success');
+    }
+
     // Geocode fallback for manual search button
     async function searchForAddress(){
       if(!state.searchAddress || !window.google){ setError('Please enter an address and ensure Google Maps is loaded'); return; }
@@ -556,25 +617,17 @@
       geocoder.geocode({address: state.searchAddress},(results,status)=>{
         if(status==='OK' && results[0]){
           const loc = { lat: results[0].geometry.location.lat(), lng: results[0].geometry.location.lng() };
-          state.mosqueLocation=loc; updateLocationInfo(); addLog(`📍 ${results[0].formatted_address}`,'success');
-          if(state.map){
-            state.map.setCenter(loc); state.map.setZoom(12);
-            clearVisualization(); clearStartingPointMarker();
-            state.startingPointMarker = new google.maps.Marker({
-              position:loc,map:state.map,title:'Starting Point',
-              icon:{path:google.maps.SymbolPath.CIRCLE,scale:10,fillColor:'#ef4444',fillOpacity:1,strokeColor:'#fff',strokeWeight:2}
-            });
-          }
+          setStartLocation(loc, results[0].formatted_address);
         } else { addLog(`❌ Geocoding failed: ${status}`,'error'); setError('Could not find location. Try a different address.'); }
       });
     }
 
     // -------- Events --------
-    el.toggleApiKey.addEventListener('click', ()=>{
+    document.getElementById('toggleApiKey').addEventListener('click', ()=>{
       el.apiKey.type = el.apiKey.type==='password' ? 'text' : 'password';
       el.toggleApiKey.textContent = el.apiKey.type==='password' ? '👁️' : '🙈';
     });
-    el.saveApiKey.addEventListener('click', ()=>{
+    document.getElementById('saveApiKey').addEventListener('click', ()=>{
       const key = el.apiKey.value.trim();
       if(key){ localStorage.setItem('gmaps_api_key',key); state.apiKey=key; addLog('API key saved to local storage','success'); loadGoogleMaps(); }
       else setError('Please enter a valid API key');
@@ -599,13 +652,17 @@
     });
 
     el.fullscreenBtn.addEventListener('click', ()=>{
-      const card = el.mapDiv.parentElement; // card containing map
+      const card = el.mapDiv.parentElement;
       if (!document.fullscreenElement){ (card.requestFullscreen ? card.requestFullscreen() : el.mapDiv.requestFullscreen?.()); }
       else { document.exitFullscreen?.(); }
     });
     el.resetViewBtn.addEventListener('click', ()=>{
-      if(state.map){ state.map.setCenter(state.mosqueLocation); state.map.setZoom(11); }
+      if(state.map){
+        if (state.startingPointMarker){ state.map.setCenter(state.mosqueLocation); state.map.setZoom(12); }
+        else { state.map.setCenter({lat:51.5074,lng:-0.1278}); state.map.setZoom(6); }
+      }
     });
+    el.exportBtn.addEventListener('click', downloadGeoJSON);
 
     // Init
     updateLocationInfo(); updateStats();
