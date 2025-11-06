@@ -77,6 +77,28 @@
             </div>
           </div>
 
+          <!-- NEW: Country restriction -->
+          <div class="form-group">
+            <label class="form-label">Country for Geocoding (to avoid name collisions)</label>
+            <div class="row" style="gap:10px;flex-wrap:wrap">
+              <select id="country" class="input" style="max-width:320px">
+                <option value="GB" selected>United Kingdom (GB)</option>
+                <option value="">None (Global)</option>
+                <option value="US">United States (US)</option>
+                <option value="CA">Canada (CA)</option>
+                <option value="AU">Australia (AU)</option>
+                <option value="DE">Germany (DE)</option>
+                <option value="FR">France (FR)</option>
+                <option value="RU">Russia (RU)</option>
+                <option value="IE">Ireland (IE)</option>
+                <option value="ES">Spain (ES)</option>
+                <option value="IT">Italy (IT)</option>
+                <option value="NL">Netherlands (NL)</option>
+              </select>
+              <span class="small">This applies a <code>country</code> component restriction to geocoding. For example, St Petersburg in <b>RU</b> vs Florida.</span>
+            </div>
+          </div>
+
           <div class="form-group">
             <label class="form-label">Locations</label>
             <div class="row toolbar">
@@ -149,9 +171,8 @@
     </div>
   </div>
 
-  <!-- JSZip + FileSaver for ZIP export (works on GitHub Pages) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha512-4+2k1dGl3rO0bN6FVnH76qQ6kEpp4pL9qI8yZ9QK2qQ6Kq8y2pJ6b3m3v1wS2yVf0x3mQvQHfW1q7C4mQ50OVg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js" integrity="sha512-bG3Z8aY3m0S3i1wZQe0w0rW3w2cPp8mGJr8qG9CkQfP2jvQq7K2hE8bqv5n6s8s3zjQ1x8h4k4V0H8r2QK4C1g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- JSZip for ZIP export (no SRI to avoid blocked loads); using native download for files -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
   <script>
     // ---------- State ----------
@@ -168,7 +189,8 @@
       totalPoints: 0,
       rows: [], // {name:'', address:'', lat:null, lng:null}
       results: [], // per origin { name, origin, points[], polygon, markers[] }
-      palette: ['#10b981','#3b82f6','#f59e0b','#ef4444','#7c3aed','#14b8a6','#f97316','#eab308','#22c55e','#8b5cf6']
+      palette: ['#10b981','#3b82f6','#f59e0b','#ef4444','#7c3aed','#14b8a6','#f97316','#eab308','#22c55e','#8b5cf6'],
+      countryCode: 'GB' // NEW: default to United Kingdom
     };
 
     // ---------- DOM ----------
@@ -177,6 +199,7 @@
       toggleApiKey: document.getElementById('toggleApiKey'),
       saveApiKey: document.getElementById('saveApiKey'),
       timeLimit: document.getElementById('timeLimit'),
+      country: document.getElementById('country'), // NEW
       rows: document.getElementById('rows'),
       addOneBtn: document.getElementById('addOneBtn'),
       addFiveBtn: document.getElementById('addFiveBtn'),
@@ -203,6 +226,13 @@
     // Load saved key
     const savedKey = localStorage.getItem('gmaps_api_key');
     if (savedKey){ state.apiKey = savedKey; el.apiKey.value = savedKey; addLog('API key loaded from local storage','success'); loadGoogleMaps(); }
+
+    // Persist/restore country selection
+    const savedCountry = localStorage.getItem('gmaps_country_code');
+    if (savedCountry !== null) {
+      state.countryCode = savedCountry;
+      el.country.value = savedCountry;
+    }
 
     // ---------- Utils ----------
     function addLog(message,type='info'){
@@ -393,20 +423,57 @@
       return { type:'FeatureCollection', features };
     }
 
-    function saveBlob(data, filename, mime){
-      const blob = new Blob([data], {type:mime});
-      saveAs(blob, filename);
+    // Robust download helper (no FileSaver dependency)
+    function downloadBlob(data, filename, mime){
+      const blob = data instanceof Blob ? data : new Blob([data], {type: mime||"application/octet-stream"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; document.body.appendChild(a);
+      a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 0);
     }
 
     async function exportCombined(){
       const fc = toGeoJSONFeatureCollection(state.results);
       if (!fc.features.length){ addLog('Nothing to export. Run a calculation first.','warning'); return; }
-      saveBlob(JSON.stringify(fc,null,2), `isochrones_${state.timeLimit}min_combined.geojson`, 'application/geo+json');
+      downloadBlob(JSON.stringify(fc,null,2), `isochrones_${state.timeLimit}min_combined.geojson`, 'application/geo+json');
+      addLog('⬇️ Exported combined GeoJSON','success');
+    }
+      downloadBlob(JSON.stringify(fc,null,2), `isochrones_${state.timeLimit}min_combined.geojson`, 'application/geo+json');
       addLog('⬇️ Exported combined GeoJSON','success');
     }
 
     async function exportZip(){
       if (!state.results.length){ addLog('Nothing to zip. Run a calculation first.','warning'); return; }
+
+      // Ensure JSZip is available (some browsers block CDN with SRI; we load on demand)
+      async function ensureZipLoaded(){
+        if (window.JSZip) return true;
+        return new Promise((resolve)=>{
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+          s.onload = ()=> resolve(true);
+          s.onerror = ()=> resolve(false);
+          document.body.appendChild(s);
+        });
+      }
+
+      const ok = await ensureZipLoaded();
+      if (!ok || !window.JSZip){ addLog('ZIP export unavailable: JSZip failed to load.','error'); return; }
+
+      const zip = new JSZip();
+      const folder = zip.folder(`isochrones_${state.timeLimit}min`);
+      state.results.forEach((r,i)=>{
+        const base = (r.name||`origin_${i+1}`).replace(/[^a-z0-9_\-]+/gi,'_');
+        const fc = toGeoJSONFeatureCollection([r]);
+        folder.file(`${base}.geojson`, JSON.stringify(fc,null,2));
+      });
+      const combined = toGeoJSONFeatureCollection(state.results);
+      folder.file(`combined.geojson`, JSON.stringify(combined,null,2));
+      const content = await zip.generateAsync({type:'blob'});
+      downloadBlob(content, `isochrones_${state.timeLimit}min.zip`, 'application/zip');
+      addLog('🗜️ Downloaded ZIP with all results','success');
+    }
       const zip = new JSZip();
       const folder = zip.folder(`isochrones_${state.timeLimit}min`);
       state.results.forEach((r,i)=>{
@@ -421,14 +488,33 @@
       addLog('🗜️ Downloaded ZIP with all results','success');
     }
 
+    // Helper to center map by country
+    const countryCenters = {
+      'GB': { center:{lat:54.7,lng:-3.3}, zoom:5 },
+      'IE': { center:{lat:53.3,lng:-8}, zoom:6 },
+      'US': { center:{lat:39.5,lng:-98.35}, zoom:4 },
+      'CA': { center:{lat:56.1,lng:-106.3}, zoom:3 },
+      'AU': { center:{lat:-25.3,lng:133.8}, zoom:4 },
+      'DE': { center:{lat:51.2,lng:10.5}, zoom:5 },
+      'FR': { center:{lat:46.2,lng:2.2}, zoom:5 },
+      'RU': { center:{lat:61.5,lng:105.3}, zoom:3 },
+      'ES': { center:{lat:40.4,lng:-3.7}, zoom:5 },
+      'IT': { center:{lat:41.9,lng:12.6}, zoom:5 },
+      'NL': { center:{lat:52.1,lng:5.3}, zoom:7 }
+    };
+
     async function geocodeOne(input){
       input = input.trim();
       // lat,lng direct
       const m = input.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
       if (m){ return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) }; }
-      // address via geocoder
+      // address via geocoder with optional country restriction
       return new Promise((resolve)=>{
-        state.geocoder.geocode({address: input},(res,status)=>{
+        const req = { address: input };
+        if (state.countryCode) {
+          req.componentRestrictions = { country: state.countryCode };
+        }
+        state.geocoder.geocode(req,(res,status)=>{
           if (status==='OK' && res[0]){
             const loc = res[0].geometry.location; resolve({ lat: loc.lat(), lng: loc.lng() });
           } else { resolve(null); }
@@ -474,7 +560,7 @@
       state.results = []; state.apiCalls=0; state.totalPoints=0; updateStats();
 
       // Geocode all
-      addLog(`📍 Geocoding ${items.length} location(s)…`);
+      addLog(`📍 Geocoding ${items.length} location(s)… (country: ${state.countryCode||'Global'})`);
       const origins = [];
       for (const it of items){
         const loc = await geocodeOne(it.address);
@@ -517,7 +603,9 @@
     }
     function initMap(){
       if (state.map) return;
-      state.map = new google.maps.Map(el.mapDiv,{ center:{lat:51.5074,lng:-0.1278}, zoom:6, fullscreenControl:true, streetViewControl:false, mapTypeControl:false, styles:[{featureType:'poi',stylers:[{visibility:'off'}]},{featureType:'transit',stylers:[{visibility:'off'}]}] });
+      const defaultCenter = countryCenters[state.countryCode]?.center || {lat:51.5074,lng:-0.1278};
+      const defaultZoom = countryCenters[state.countryCode]?.zoom || 6;
+      state.map = new google.maps.Map(el.mapDiv,{ center:defaultCenter, zoom:defaultZoom, fullscreenControl:true, streetViewControl:false, mapTypeControl:false, styles:[{featureType:'poi',stylers:[{visibility:'off'}]},{featureType:'transit',stylers:[{visibility:'off'}]}] });
       state.directionsService = new google.maps.DirectionsService();
       state.geocoder = new google.maps.Geocoder();
     }
@@ -529,6 +617,16 @@
     });
     el.saveApiKey.addEventListener('click',()=>{ const k=el.apiKey.value.trim(); if(k){ localStorage.setItem('gmaps_api_key',k); state.apiKey=k; addLog('API key saved','success'); loadGoogleMaps(); } });
     el.apiKey.addEventListener('change', e=>{ state.apiKey=e.target.value; if(state.apiKey) loadGoogleMaps(); });
+
+    el.country.addEventListener('change', (e)=>{
+      state.countryCode = e.target.value;
+      localStorage.setItem('gmaps_country_code', state.countryCode);
+      const cc = state.countryCode || 'Global';
+      addLog(`🌍 Country restriction set to: ${cc}`,'info');
+      // Recenter map to selected country for convenience
+      const cfg = countryCenters[state.countryCode];
+      if (cfg && state.map){ state.map.setCenter(cfg.center); state.map.setZoom(cfg.zoom); }
+    });
 
     el.addOneBtn.addEventListener('click',()=> addRow());
     el.addFiveBtn.addEventListener('click',()=>{ for(let i=0;i<5;i++) addRow(); });
@@ -547,12 +645,17 @@
     el.zipBtn.addEventListener('click', exportZip);
 
     el.clearLogBtn.addEventListener('click',()=>{ state.logs=[]; addLog('Logs cleared','info'); });
-    el.resetViewBtn.addEventListener('click',()=>{ if(state.map){ state.map.setCenter({lat:51.5074,lng:-0.1278}); state.map.setZoom(6); } });
+    el.resetViewBtn.addEventListener('click',()=>{
+      if(state.map){
+        const cfg = countryCenters[state.countryCode] || { center:{lat:51.5074,lng:-0.1278}, zoom:6 };
+        state.map.setCenter(cfg.center); state.map.setZoom(cfg.zoom);
+      }
+    });
     el.fullscreenBtn.addEventListener('click',()=>{ const card = el.mapDiv.parentElement; if (!document.fullscreenElement){ (card.requestFullscreen ? card.requestFullscreen() : el.mapDiv.requestFullscreen?.()); } else { document.exitFullscreen?.(); }});
 
-    // Pre-populate a couple of rows for convenience
-    addRow('London','London, UK');
-    addRow('Manchester','Manchester, UK');
+    // Pre-populate a couple of rows for convenience (UK by default)
+    addRow('London','London');
+    addRow('Manchester','Manchester');
 
   </script>
 </body>
