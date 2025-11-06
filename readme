@@ -1,0 +1,161 @@
+# 🛣️ Road-Aware Isochrone Calculator
+
+A free, open-source tool for calculating accurate travel time boundaries that follow actual roads, not just straight lines.
+
+🔗 **[Try it Live](https://wadoodt.github.io/googleMapsDistanceVisualiser/)**
+
+## What is an Isochrone?
+
+An isochrone map shows all areas reachable within a given time from a starting point. Unlike simple radius circles, this tool creates **road-aware isochrones** that follow actual driving routes, giving you the true picture of what's accessible within your time limit.
+
+## ✨ Features
+
+- **🛣️ Road-Aware Calculations**: Follows actual roads including motorways, highways, and local streets
+- **📍 Real Travel Times**: Uses Google Maps Directions API for accurate, traffic-aware timings
+- **🎨 Visual Mapping**: Interactive map with clear boundary visualization
+- **💰 Cost Transparency**: Shows estimated API costs before and after calculation
+- **🔒 Privacy First**: Your API key stays in your browser - never sent to any server
+- **⚡ Fast & Efficient**: Optimized algorithm minimizes API calls while maintaining accuracy
+
+## 🚀 Quick Start
+
+### 1. Get a Google Maps API Key
+
+You'll need your own Google Maps API key to use this tool. Here's how:
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project (or select an existing one)
+3. Enable these APIs:
+   - **Maps JavaScript API**
+   - **Directions API** 
+   - **Places API**
+4. Go to "Credentials" and create an API Key
+5. **Important**: Click "Edit API Key" and add restrictions (see Security section below)
+
+### 2. Use the Tool
+
+1. Visit [the live tool](https://wadoodt.github.io/googleMapsDistanceVisualiser/)
+2. Enter your Google Maps API key
+3. Click "Save Locally" to store it in your browser (optional)
+4. Search for any starting location
+5. Adjust time limit (5-60 minutes) and accuracy settings
+6. Click "Calculate" to generate your isochrone
+
+## 🔒 API Key Security
+
+**⚠️ Critical: Always restrict your API key!**
+
+### Recommended Restrictions:
+
+1. **HTTP Referrer Restriction**:
+   - Add: `https://wadoodt.github.io/googleMapsDistanceVisualiser/*`
+   - This ensures your key only works on this tool
+
+2. **API Restrictions**:
+   - Restrict to only: Maps JavaScript API, Directions API, Places API
+   - This prevents misuse of other Google services
+
+3. **Quotas** (optional but recommended):
+   - Set daily request limits
+   - Set per-user limits
+
+### How to Add Restrictions:
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Navigate to "APIs & Services" → "Credentials"
+3. Click on your API key
+4. Under "Application restrictions", select "HTTP referrers"
+5. Add the URL above
+6. Under "API restrictions", select "Restrict key"
+7. Choose only the three required APIs
+8. Save
+
+## 💵 Costs
+
+- **Per API Call**: ~$0.005 (half a cent)
+- **Typical Calculation**: 50-100 calls = $0.25-$0.50
+- **Google's Free Tier**: $200 monthly credit (covers ~40,000 API calls)
+- **Cost Control**: Adjust "Max API Calls" slider to limit spending
+
+Most personal users will stay well within the free tier.
+
+## 🎯 How It Works
+
+1. **Starting Point**: You specify a location (address or coordinates)
+2. **Test Destinations**: The tool generates points in multiple directions
+3. **Route Calculation**: For each point, it requests actual driving directions
+4. **Boundary Finding**: Along each route, it finds the exact point reachable in your time limit
+5. **Polygon Creation**: These boundary points are connected to form your isochrone
+6. **Gap Filling**: The algorithm intelligently fills gaps for a complete picture
+
+## 📊 Understanding the Results
+
+- **Green Markers**: Boundary points reachable in your specified time
+- **Red Marker**: Your starting location
+- **Green Polygon**: The isochrone area - everywhere you can reach
+- **Blue Lines**: Actual road routes tested (when visible)
+
+## 🛠️ Settings Explained
+
+- **Time Limit** (5-60 minutes): How far you want to travel
+- **Max API Calls** (20-200): More calls = higher accuracy but higher cost
+  - 20-50: Basic accuracy, good for rough estimates
+  - 50-100: Balanced accuracy vs cost (recommended)
+  - 100-200: High accuracy, best for detailed analysis
+
+## 🐛 Troubleshooting
+
+### "Failed to load Google Maps"
+- Check that your API key is correct
+- Ensure the required APIs are enabled
+- Verify billing is enabled on your Google Cloud account
+
+### "API: REQUEST_DENIED"
+- Your API key needs HTTP referrer restrictions
+- Make sure you've enabled all three required APIs
+
+### No boundary points found
+- Try a different starting location
+- Increase the time limit
+- Check that your area has road data in Google Maps
+
+### Incomplete or odd-shaped isochrones
+- Increase "Max API Calls" for better coverage
+- Some areas may have limited road access
+- Water bodies and restricted areas create natural gaps
+
+## 🤝 Contributing
+
+This is an open-source project! Contributions are welcome:
+
+- Report bugs via [GitHub Issues](https://github.com/wadoodt/googleMapsDistanceVisualiser/issues)
+- Suggest features or improvements
+- Submit pull requests
+
+## 📜 License
+
+MIT License - Feel free to use, modify, and distribute this tool.
+
+## 🙏 Acknowledgments
+
+- Built with Google Maps JavaScript API
+- Inspired by the need for accurate travel time planning
+- Created for anyone who needs to understand true travel boundaries
+
+## ⚡ Tips for Best Results
+
+1. **Urban Areas**: Work best due to dense road networks
+2. **Rural Areas**: May need higher "Max API Calls" for accuracy
+3. **Peak Hours**: Results reflect current traffic if calculated during busy times
+4. **Multiple Searches**: Try different times of day for traffic variations
+
+## 📧 Support
+
+Having issues? 
+- Check this README first
+- Open an [issue on GitHub](https://github.com/wadoodt/googleMapsDistanceVisualiser/issues)
+- Include your browser, any error messages, and steps to reproduce
+
+---
+
+Made with ❤️ for accurate travel planning. No more guessing about travel times!
