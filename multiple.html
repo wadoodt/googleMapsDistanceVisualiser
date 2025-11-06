@@ -259,19 +259,49 @@
       el.usageCost.textContent = `$${cost.toFixed(3)}`;
     }
 
-    function addRow(name='', address=''){
+    function addRow(name = '', address = '') {
       const idx = state.rows.length + 1;
+    
       const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td class="small">${idx}</td>
-        <td><input class="input name" placeholder="Name (optional)" value="${name}"></td>
-        <td><input class="input address" placeholder="Address or lat,lng" value="${address}"></td>
-        <td><button class="btn-ghost btn remove" type="button">✖</button></td>`;
+    
+      const tdIdx = document.createElement('td');
+      tdIdx.className = 'small';
+      tdIdx.textContent = idx;
+    
+      const tdName = document.createElement('td');
+      const nameInput = document.createElement('input');
+      nameInput.className = 'input name';
+      nameInput.placeholder = 'Name (optional)';
+      nameInput.value = name;
+      tdName.appendChild(nameInput);
+    
+      const tdAddr = document.createElement('td');
+      const addrInput = document.createElement('input');
+      addrInput.className = 'input address';
+      addrInput.placeholder = 'Address or lat,lng';
+      addrInput.value = address;
+      tdAddr.appendChild(addrInput);
+    
+      const tdRemove = document.createElement('td');
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'btn-ghost btn remove';
+      removeBtn.type = 'button';
+      removeBtn.textContent = '✖';
+      tdRemove.appendChild(removeBtn);
+    
+      tr.append(tdIdx, tdName, tdAddr, tdRemove);
       el.rows.appendChild(tr);
+    
       state.rows.push(tr);
       el.listStats.textContent = `${state.rows.length} locations`;
-      tr.querySelector('.remove').addEventListener('click',()=>{ tr.remove(); state.rows = state.rows.filter(r=>r!==tr); renumberRows(); });
+    
+      removeBtn.addEventListener('click', () => {
+        tr.remove();
+        state.rows = state.rows.filter(r => r !== tr);
+        renumberRows();
+      });
     }
+
     function renumberRows(){
       [...el.rows.children].forEach((tr,i)=> tr.children[0].textContent = i+1);
       el.listStats.textContent = `${state.rows.length} locations`;
@@ -290,12 +320,59 @@
       }).filter(Boolean);
     }
 
-    function parseCSV_AddressOnly(text){
-      return text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(line=>{
-        const addr = line.split(',')[0].trim();
-        return { name:'', address: addr };
-      });
+    function parseCSV_NameAddress(text) {
+      return text
+        .split(/\r?\n/)
+        .map(l => l.trim())
+        .filter(Boolean)
+        .map(line => {
+          const parts = splitCsvLine(line);
+          if (parts.length < 2) return null;
+          return { name: parts[0], address: parts.slice(1).join(',') };
+        })
+        .filter(Boolean);
     }
+    
+    function stripBOM(s) {
+      return s.replace(/^\uFEFF/, '');
+    }
+    
+    function unquote(s) {
+      // Remove balanced leading/trailing quotes and unescape doubled quotes
+      if (s.startsWith('"') && s.endsWith('"')) {
+        s = s.slice(1, -1).replace(/""/g, '"');
+      }
+      return s;
+    }
+    
+    function parseCSV_AddressOnly(text) {
+      return text
+        .split(/\r?\n/)
+        .map(l => stripBOM(l).trim())
+        .filter(l => l.length > 0)
+        .map(line => ({ name: '', address: unquote(line) }));
+    }
+
+    function splitCsvLine(line) {
+      line = stripBOM(line);
+      const fields = [];
+      let cur = '', inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQ && line[i + 1] === '"') { cur += '"'; i++; } // escaped quote
+          else inQ = !inQ;
+        } else if (ch === ',' && !inQ) {
+          fields.push(cur.trim());
+          cur = '';
+        } else {
+          cur += ch;
+        }
+      }
+      fields.push(cur.trim());
+      return fields;
+    }
+
 
     function parseCSV_Auto(text){
       return text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(line=>{
@@ -616,13 +693,17 @@
     el.addFiveBtn.addEventListener('click',()=>{ for(let i=0;i<5;i++) addRow(); });
     el.clearListBtn.addEventListener('click',()=>{ el.rows.innerHTML=''; state.rows=[]; renumberRows(); });
 
-    el.fileInput.addEventListener('change', async (e)=>{
-      const file = e.target.files?.[0]; if(!file) return;
+    el.fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0]; if (!file) return;
+      // Clear existing rows (optional)
+      el.rows.innerHTML = ''; state.rows = []; renumberRows();
+    
       const list = await parseFile(file, state.uploadMode);
-      list.forEach(item=> addRow(item.name||'', item.address||''));
-      addLog(`📥 Loaded ${list.length} from file (${state.uploadMode})`,'success');
-      e.target.value='';
+      list.forEach(item => addRow(item.name || '', item.address || ''));
+      addLog(`📥 Loaded ${list.length} from file (${state.uploadMode})`, 'success');
+      e.target.value = '';
     });
+
 
     el.calcBtn.addEventListener('click', runCalculation);
     el.exportAllBtn.addEventListener('click', exportCombined);
