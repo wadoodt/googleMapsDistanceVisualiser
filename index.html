@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Road-Aware Isochrone Calculator</title>
+    <meta name="description" content="Calculate accurate travel time boundaries following actual roads. Free, open-source tool using Google Maps API.">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #f3f4f6;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            padding: 24px;
+            margin-bottom: 16px;
+        }
+
+        .header {
+            background: linear-gradient(to right, #059669, #2563eb);
+            color: white;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 16px;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            opacity: 0.9;
+        }
+
+        .warning-box {
+            background: #fef3c7;
+            border: 1px solid #fbbf24;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: start;
+            gap: 12px;
+        }
+
+        .warning-icon {
+            color: #f59e0b;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .warning-content {
+            flex: 1;
+        }
+
+        .warning-title {
+            font-weight: 600;
+            color: #92400e;
+            margin-bottom: 4px;
+        }
+
+        .warning-message {
+            font-size: 14px;
+            color: #92400e;
+            line-height: 1.5;
+        }
+
+        .warning-message a {
+            color: #2563eb;
+            text-decoration: underline;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: #374151;
+            margin-bottom: 8px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .input-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .input-group .form-input {
+            flex: 1;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn:hover:not(:disabled) {
+            background: #1d4ed8;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: linear-gradient(to right, #059669, #2563eb);
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: linear-gradient(to right, #047857, #1d4ed8);
+        }
+
+        .btn-icon {
+            padding: 8px;
+        }
+
+        .btn-secondary {
+            background: #6b7280;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #4b5563;
+        }
+
+        .strategy-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .strategy-btn {
+            padding: 16px;
+            border: 2px solid #e5e7eb;
+            border-radius: 6px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .strategy-btn:hover {
+            border-color: #d1d5db;
+        }
+
+        .strategy-btn.active {
+            border-color: #2563eb;
+            background: #eff6ff;
+        }
+
+        .strategy-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .strategy-btn .icon {
+            font-size: 20px;
+            margin-bottom: 4px;
+        }
+
+        .strategy-btn .title {
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+
+        .strategy-btn .subtitle {
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .settings-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .slider-container {
+            margin-bottom: 16px;
+        }
+
+        .slider {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #e5e7eb;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #2563eb;
+            cursor: pointer;
+        }
+
+        .slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #2563eb;
+            cursor: pointer;
+        }
+
+        .error-box {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: start;
+            gap: 12px;
+        }
+
+        .error-icon {
+            color: #dc2626;
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .error-content {
+            flex: 1;
+        }
+
+        .error-title {
+            font-weight: 500;
+            color: #991b1b;
+            margin-bottom: 4px;
+        }
+
+        .error-message {
+            font-size: 14px;
+            color: #b91c1c;
+        }
+
+        .log-container {
+            background: #111827;
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .log-title {
+            color: white;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .log-clear {
+            background: none;
+            border: none;
+            color: #9ca3af;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .log-clear:hover {
+            color: white;
+        }
+
+        .log-content {
+            background: black;
+            border-radius: 6px;
+            padding: 12px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .log-entry {
+            margin-bottom: 4px;
+        }
+
+        .log-entry.error {
+            color: #f87171;
+        }
+
+        .log-entry.warning {
+            color: #fbbf24;
+        }
+
+        .log-entry.success {
+            color: #34d399;
+        }
+
+        .log-entry.info {
+            color: #d1d5db;
+        }
+
+        .log-timestamp {
+            color: #6b7280;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            color: #6b7280;
+        }
+
+        #map {
+            width: 100%;
+            height: 400px;
+            border-radius: 8px;
+            background: #f3f4f6;
+            border: 1px solid #e5e7eb;
+        }
+
+        .info-box {
+            background: #dbeafe;
+            border-radius: 8px;
+            padding: 24px;
+        }
+
+        .info-title {
+            font-weight: 600;
+            color: #1e3a8a;
+            margin-bottom: 12px;
+        }
+
+        .info-list {
+            font-size: 14px;
+            color: #1e40af;
+            line-height: 1.6;
+        }
+
+        .info-list p {
+            margin-bottom: 4px;
+        }
+
+        .location-info {
+            margin-top: 4px;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .footer {
+            text-align: center;
+            padding: 32px 16px;
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .footer a {
+            color: #2563eb;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        @media (max-width: 640px) {
+            .settings-grid,
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .strategy-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🛣️ Road-Aware Isochrone Calculator</h1>
+            <p>Follow actual roads to find your true travel boundary</p>
+        </div>
+
+        <!-- Important Notice -->
+        <div class="warning-box">
+            <span class="warning-icon">⚠️</span>
+            <div class="warning-content">
+                <div class="warning-title">Important: API Key Required</div>
+                <div class="warning-message">
+                    This tool requires a Google Maps API key with Directions API and Places API enabled. 
+                    <strong>Keep your API key private!</strong> Only use keys with proper restrictions.
+                    <a href="https://developers.google.com/maps/documentation/javascript/get-api-key" target="_blank">Learn how to get and secure an API key →</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- API Key -->
+        <div class="card">
+            <div class="form-group">
+                <label class="form-label">Google Maps API Key</label>
+                <div class="input-group">
+                    <input 
+                        type="password" 
+                        id="apiKey" 
+                        class="form-input" 
+                        placeholder="Enter your API key..."
+                    >
+                    <button id="toggleApiKey" class="btn btn-icon btn-secondary">👁️</button>
+                    <button id="saveApiKey" class="btn">Save Locally</button>
+                </div>
+                <div class="location-info">
+                    Your API key is stored locally in your browser only. Estimated cost: ~$0.005 per API call.
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Display -->
+        <div id="errorBox" class="error-box hidden">
+            <span class="error-icon">⚠️</span>
+            <div class="error-content">
+                <div class="error-title">Error</div>
+                <div id="errorMessage" class="error-message"></div>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="card">
+            <!-- Location Search -->
+            <div class="form-group">
+                <label class="form-label">Starting Location</label>
+                <div class="input-group">
+                    <input 
+                        type="text" 
+                        id="searchAddress" 
+                        class="form-input" 
+                        placeholder="Enter address or place name..."
+                        value="London, UK"
+                    >
+                    <button id="searchBtn" class="btn btn-icon">📍</button>
+                </div>
+                <div id="locationInfo" class="location-info">
+                    Current: (51.5074, -0.1278)
+                </div>
+            </div>
+
+            <!-- Algorithm Selection -->
+            <div class="form-group">
+                <label class="form-label">Algorithm Strategy</label>
+                <div class="strategy-grid">
+                    <button id="strategyRoads" class="strategy-btn active">
+                        <div class="icon">🛣️</div>
+                        <div class="title">Road-Aware</div>
+                        <div class="subtitle">Follow actual roads</div>
+                    </button>
+                    <button id="strategyRadial" class="strategy-btn" disabled>
+                        <div class="icon">🧭</div>
+                        <div class="title">Radial</div>
+                        <div class="subtitle">Compass directions</div>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Settings -->
+            <div class="settings-grid">
+                <div class="slider-container">
+                    <label class="form-label">
+                        Time Limit: <span id="timeLimitValue">15</span> minutes
+                    </label>
+                    <input 
+                        type="range" 
+                        id="timeLimit" 
+                        class="slider" 
+                        min="5" 
+                        max="60" 
+                        value="15"
+                    >
+                </div>
+                <div class="slider-container">
+                    <label class="form-label">
+                        Max API Calls: <span id="maxApiCallsValue">100</span>
+                    </label>
+                    <input 
+                        type="range" 
+                        id="maxApiCalls" 
+                        class="slider" 
+                        min="20" 
+                        max="200" 
+                        step="10" 
+                        value="100"
+                    >
+                </div>
+            </div>
+
+            <!-- Calculate Button -->
+            <button id="calculateBtn" class="btn btn-primary">
+                <span id="calculateBtnContent">
+                    ⚡ Calculate 15-Minute Road Isochrone
+                </span>
+            </button>
+        </div>
+
+        <!-- Debug Logs -->
+        <div class="card log-container">
+            <div class="log-header">
+                <div class="log-title">
+                    ℹ️ Activity Log
+                </div>
+                <button id="clearLogsBtn" class="log-clear">Clear</button>
+            </div>
+            <div id="logContent" class="log-content">
+                <div style="color: #6b7280;">Waiting for API key...</div>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div id="statsCard" class="card hidden">
+            <h3 style="font-weight: 600; margin-bottom: 16px;">Results Summary</h3>
+            <div class="stats-grid">
+                <div>
+                    <div id="apiCallsStat" class="stat-value" style="color: #2563eb;">0</div>
+                    <div class="stat-label">API Calls</div>
+                </div>
+                <div>
+                    <div id="pointsStat" class="stat-value" style="color: #059669;">0</div>
+                    <div class="stat-label">Points Found</div>
+                </div>
+                <div>
+                    <div id="costStat" class="stat-value" style="color: #7c3aed;">$0.000</div>
+                    <div class="stat-label">Est. Cost</div>
+                </div>
+                <div>
+                    <div id="completeStat" class="stat-value" style="color: #ea580c;">—</div>
+                    <div class="stat-label">Complete</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Map -->
+        <div class="card">
+            <h3 style="font-weight: 600; margin-bottom: 16px;">Interactive Map</h3>
+            <div id="map"></div>
+        </div>
+
+        <!-- Info -->
+        <div class="info-box">
+            <h3 class="info-title">🛣️ How This Works</h3>
+            <div class="info-list">
+                <p>• Tests actual driving routes to multiple destinations</p>
+                <p>• Follows real roads including motorways and A-roads</p>
+                <p>• Calculates exact boundary along each route</p>
+                <p>• Creates accurate isochrone that respects road network</p>
+                <p>• Uses Google Maps Directions API for real travel times</p>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>
+                Open Source Tool | 
+                <a href="https://github.com/yourusername/road-isochrone" target="_blank">View on GitHub</a> | 
+                <a href="https://github.com/yourusername/road-isochrone/issues" target="_blank">Report Issues</a>
+            </p>
+            <p style="margin-top: 8px;">
+                Made with ❤️ for accurate travel planning
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // State management
+        const state = {
+            apiKey: '',
+            mosqueLocation: { lat: 51.5074, lng: -0.1278 }, // Default to London
+            searchAddress: 'London, UK',
+            isCalculating: false,
+            logs: [],
+            error: '',
+            apiCalls: 0,
+            boundaries: [],
+            timeLimit: 15,
+            maxApiCalls: 100,
+            strategy: 'roads',
+            map: null,
+            markers: [],
+            polygon: null,
+            paths: [],
+            directionsService: null,
+            placesService: null,
+            startingPointMarker: null
+        };
+
+        // DOM elements
+        const elements = {
+            apiKey: document.getElementById('apiKey'),
+            toggleApiKey: document.getElementById('toggleApiKey'),
+            saveApiKey: document.getElementById('saveApiKey'),
+            searchAddress: document.getElementById('searchAddress'),
+            searchBtn: document.getElementById('searchBtn'),
+            calculateBtn: document.getElementById('calculateBtn'),
+            clearLogsBtn: document.getElementById('clearLogsBtn'),
+            logContent: document.getElementById('logContent'),
+            errorBox: document.getElementById('errorBox'),
+            errorMessage: document.getElementById('errorMessage'),
+            locationInfo: document.getElementById('locationInfo'),
+            timeLimit: document.getElementById('timeLimit'),
+            timeLimitValue: document.getElementById('timeLimitValue'),
+            maxApiCalls: document.getElementById('maxApiCalls'),
+            maxApiCallsValue: document.getElementById('maxApiCallsValue'),
+            strategyRoads: document.getElementById('strategyRoads'),
+            strategyRadial: document.getElementById('strategyRadial'),
+            statsCard: document.getElementById('statsCard'),
+            apiCallsStat: document.getElementById('apiCallsStat'),
+            pointsStat: document.getElementById('pointsStat'),
+            costStat: document.getElementById('costStat'),
+            completeStat: document.getElementById('completeStat'),
+            calculateBtnContent: document.getElementById('calculateBtnContent')
+        };
+
+        // Check for saved API key
+        const savedApiKey = localStorage.getItem('gmaps_api_key');
+        if (savedApiKey) {
+            state.apiKey = savedApiKey;
+            elements.apiKey.value = savedApiKey;
+            addLog('API key loaded from local storage', 'success');
+            loadGoogleMaps();
+        }
+
+        // Utility functions
+        function addLog(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            state.logs.push({ message, type, timestamp });
+            console.log(`[${type}] ${message}`);
+            renderLogs();
+        }
+
+        function renderLogs() {
+            if (state.logs.length === 0) {
+                elements.logContent.innerHTML = '<div style="color: #6b7280;">Waiting for API key...</div>';
+                return;
+            }
+
+            elements.logContent.innerHTML = state.logs.map(log => `
+                <div class="log-entry ${log.type}">
+                    <span class="log-timestamp">[${log.timestamp}]</span> ${log.message}
+                </div>
+            `).join('');
+            
+            elements.logContent.scrollTop = elements.logContent.scrollHeight;
+        }
+
+        function setError(message) {
+            state.error = message;
+            if (message) {
+                elements.errorMessage.textContent = message;
+                elements.errorBox.classList.remove('hidden');
+            } else {
+                elements.errorBox.classList.add('hidden');
+            }
+        }
+
+        function updateStats() {
+            if (state.apiCalls > 0 || state.boundaries.length > 0) {
+                elements.statsCard.classList.remove('hidden');
+                elements.apiCallsStat.textContent = state.apiCalls;
+                elements.pointsStat.textContent = state.boundaries.length;
+                elements.costStat.textContent = `$${(state.apiCalls * 0.005).toFixed(3)}`;
+                elements.completeStat.textContent = state.boundaries.length > 0 ? '✓' : '—';
+            } else {
+                elements.statsCard.classList.add('hidden');
+            }
+        }
+
+        function updateLocationInfo() {
+            elements.locationInfo.textContent = 
+                `Current: (${state.mosqueLocation.lat.toFixed(4)}, ${state.mosqueLocation.lng.toFixed(4)})`;
+        }
+
+        function clearStartingPointMarker() {
+            if (state.startingPointMarker) {
+                state.startingPointMarker.setMap(null);
+                state.startingPointMarker = null;
+            }
+        }
+
+        // Google Maps functions
+        function loadGoogleMaps() {
+            if (!state.apiKey) {
+                addLog('Please enter your Google Maps API key', 'warning');
+                return;
+            }
+            
+            if (window.google && window.google.maps) {
+                addLog('Google Maps already loaded', 'success');
+                initializeMap();
+                return;
+            }
+            
+            addLog('Loading Google Maps script...', 'info');
+            const script = document.createElement('script');
+            script.src = `https://maps.googleapis.com/maps/api/js?key=${state.apiKey}&libraries=geometry,places`;
+            script.async = true;
+            script.onload = () => {
+                addLog('Google Maps loaded successfully', 'success');
+                initializeMap();
+            };
+            script.onerror = () => {
+                setError('Failed to load Google Maps. Please check your API key and ensure it has the required APIs enabled.');
+                addLog('Failed to load Google Maps', 'error');
+            };
+            document.body.appendChild(script);
+        }
+
+        function initializeMap() {
+            const mapDiv = document.getElementById('map');
+            if (!mapDiv || state.map) return;
+            
+            try {
+                addLog('Initializing map...', 'info');
+                state.map = new google.maps.Map(mapDiv, {
+                    center: state.mosqueLocation,
+                    zoom: 11,
+                    styles: [
+                        { featureType: "poi", stylers: [{ visibility: "off" }] },
+                        { featureType: "transit", stylers: [{ visibility: "off" }] }
+                    ]
+                });
+                
+                state.directionsService = new google.maps.DirectionsService();
+                state.placesService = new google.maps.places.PlacesService(state.map);
+                
+                addLog('Map initialized successfully', 'success');
+            } catch (err) {
+                addLog(`Map initialization error: ${err.message}`, 'error');
+                setError('Failed to initialize map');
+            }
+        }
+
+        function clearVisualization() {
+            state.markers.forEach(marker => marker.setMap(null));
+            state.markers = [];
+            state.paths.forEach(path => path.setMap(null));
+            state.paths = [];
+            if (state.polygon) {
+                state.polygon.setMap(null);
+                state.polygon = null;
+            }
+        }
+
+        function calculateDestinationPoint(origin, bearing, distance) {
+            const R = 6371;
+            const lat1 = origin.lat * Math.PI / 180;
+            const lng1 = origin.lng * Math.PI / 180;
+            const bearingRad = bearing * Math.PI / 180;
+            
+            const lat2 = Math.asin(
+                Math.sin(lat1) * Math.cos(distance / R) +
+                Math.cos(lat1) * Math.sin(distance / R) * Math.cos(bearingRad)
+            );
+            const lng2 = lng1 + Math.atan2(
+                Math.sin(bearingRad) * Math.sin(distance / R) * Math.cos(lat1),
+                Math.cos(distance / R) - Math.sin(lat1) * Math.sin(lat2)
+            );
+            
+            return {
+                lat: lat2 * 180 / Math.PI,
+                lng: lng2 * 180 / Math.PI
+            };
+        }
+
+        async function findMajorDestinations(center) {
+            addLog('🔍 Generating test destinations...', 'info');
+            
+            const destinations = [];
+            const distances = [10000, 20000, 30000, 40000];
+            const angles = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330];
+            
+            angles.forEach(angle => {
+                distances.forEach(distance => {
+                    const point = calculateDestinationPoint(center, angle, distance / 1000);
+                    destinations.push({
+                        location: point,
+                        name: `Point ${angle}° at ${distance/1000}km`,
+                        type: 'geometric'
+                    });
+                });
+            });
+            
+            addLog(`📍 Generated ${destinations.length} test destinations`, 'success');
+            return destinations;
+        }
+
+        async function testRouteToDestination(origin, destination) {
+            try {
+                const request = {
+                    origin: origin,
+                    destination: destination.location,
+                    travelMode: google.maps.TravelMode.DRIVING,
+                    unitSystem: google.maps.UnitSystem.METRIC,
+                    avoidHighways: false,
+                    avoidTolls: false,
+                    provideRouteAlternatives: true
+                };
+                
+                const result = await new Promise((resolve, reject) => {
+                    state.directionsService.route(request, (result, status) => {
+                        if (status === 'OK') {
+                            resolve(result);
+                        } else if (status === 'ZERO_RESULTS') {
+                            resolve(null);
+                        } else {
+                            reject(new Error(`API: ${status}`));
+                        }
+                    });
+                });
+                
+                state.apiCalls++;
+                updateStats();
+                
+                if (!result || !result.routes || result.routes.length === 0) {
+                    return null;
+                }
+                
+                const boundaries = [];
+                for (const route of result.routes) {
+                    let totalTime = 0;
+                    let boundaryPoint = null;
+                    const pathPoints = [];
+                    
+                    for (const leg of route.legs) {
+                        for (const step of leg.steps) {
+                            const stepDuration = step.duration.value / 60;
+                            
+                            if (totalTime + stepDuration <= state.timeLimit) {
+                                totalTime += stepDuration;
+                                if (step.path) {
+                                    pathPoints.push(...step.path);
+                                }
+                            } else {
+                                const remainingTime = state.timeLimit - totalTime;
+                                const fraction = Math.min(remainingTime / stepDuration, 1);
+                                
+                                if (step.path && step.path.length > 1) {
+                                    const totalDistance = google.maps.geometry.spherical.computeLength(step.path);
+                                    const targetDistance = totalDistance * fraction;
+                                    let accumulatedDistance = 0;
+                                    
+                                    for (let i = 0; i < step.path.length - 1; i++) {
+                                        const segmentDistance = google.maps.geometry.spherical.computeDistanceBetween(
+                                            step.path[i], 
+                                            step.path[i + 1]
+                                        );
+                                        
+                                        if (accumulatedDistance + segmentDistance >= targetDistance) {
+                                            const segmentFraction = (targetDistance - accumulatedDistance) / segmentDistance;
+                                            const lat = step.path[i].lat() + (step.path[i + 1].lat() - step.path[i].lat()) * segmentFraction;
+                                            const lng = step.path[i].lng() + (step.path[i + 1].lng() - step.path[i].lng()) * segmentFraction;
+                                            boundaryPoint = { lat, lng };
+                                            break;
+                                        }
+                                        accumulatedDistance += segmentDistance;
+                                    }
+                                } else {
+                                    const start = step.start_location;
+                                    const end = step.end_location;
+                                    boundaryPoint = {
+                                        lat: start.lat() + (end.lat() - start.lat()) * fraction,
+                                        lng: start.lng() + (end.lng() - start.lng()) * fraction
+                                    };
+                                }
+                                
+                                break;
+                            }
+                        }
+                        if (boundaryPoint) break;
+                    }
+                    
+                    if (boundaryPoint) {
+                        if (pathPoints.length > 0 && state.map) {
+                            const path = new google.maps.Polyline({
+                                path: pathPoints.slice(0, Math.ceil(pathPoints.length * (totalTime / (route.legs[0].duration.value / 60)))),
+                                geodesic: true,
+                                strokeColor: '#3b82f6',
+                                strokeOpacity: 0.3,
+                                strokeWeight: 2,
+                                map: state.map
+                            });
+                            state.paths.push(path);
+                        }
+                        
+                        const angle = Math.atan2(
+                            boundaryPoint.lng - origin.lng,
+                            boundaryPoint.lat - origin.lat
+                        ) * 180 / Math.PI;
+                        
+                        addLog(`✓ Found boundary at ${angle.toFixed(0)}° via ${route.summary}`, 'success');
+                        boundaries.push(boundaryPoint);
+                    }
+                }
+                
+                if (boundaries.length > 0) {
+                    boundaries.sort((a, b) => {
+                        const distA = Math.sqrt(Math.pow(a.lat - origin.lat, 2) + Math.pow(a.lng - origin.lng, 2));
+                        const distB = Math.sqrt(Math.pow(b.lat - origin.lat, 2) + Math.pow(b.lng - origin.lng, 2));
+                        return distB - distA;
+                    });
+                    return boundaries[0];
+                }
+                
+                return null;
+                
+            } catch (err) {
+                return null;
+            }
+        }
+
+        async function fillGapsInBoundary(boundaryPoints) {
+            const additionalPoints = [];
+            const center = state.mosqueLocation;
+            
+            const sortedPoints = [...boundaryPoints].sort((a, b) => {
+                const angleA = Math.atan2(a.lng - center.lng, a.lat - center.lat);
+                const angleB = Math.atan2(b.lng - center.lng, b.lat - center.lat);
+                return angleA - angleB;
+            });
+            
+            for (let i = 0; i < sortedPoints.length; i++) {
+                const nextIndex = (i + 1) % sortedPoints.length;
+                const p1 = sortedPoints[i];
+                const p2 = sortedPoints[nextIndex];
+                
+                const angle1 = Math.atan2(p1.lng - center.lng, p1.lat - center.lat) * 180 / Math.PI;
+                const angle2 = Math.atan2(p2.lng - center.lng, p2.lat - center.lat) * 180 / Math.PI;
+                
+                let angleDiff = angle2 - angle1;
+                if (angleDiff < 0) angleDiff += 360;
+                
+                if (angleDiff > 30 && state.apiCalls < state.maxApiCalls) {
+                    const midAngle = (angle1 + angleDiff / 2) % 360;
+                    const testPoint = calculateDestinationPoint(center, midAngle, 25);
+                    
+                    const result = await testRouteToDestination(center, {
+                        location: testPoint,
+                        name: `Gap fill at ${midAngle.toFixed(0)}°`
+                    });
+                    
+                    if (result) {
+                        additionalPoints.push(result);
+                    }
+                }
+            }
+            
+            return additionalPoints;
+        }
+
+        function visualizeResults(boundaryPoints) {
+            if (!state.map) return;
+            
+            addLog(`🎨 Drawing ${boundaryPoints.length} boundary points`, 'info');
+            
+            if (!state.startingPointMarker) {
+                state.startingPointMarker = new google.maps.Marker({
+                    position: state.mosqueLocation,
+                    map: state.map,
+                    title: 'Starting Point',
+                    icon: {
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 10,
+                        fillColor: '#ef4444',
+                        fillOpacity: 1,
+                        strokeColor: '#ffffff',
+                        strokeWeight: 2,
+                    }
+                });
+            }
+            
+            boundaryPoints.forEach((point, index) => {
+                const marker = new google.maps.Marker({
+                    position: point,
+                    map: state.map,
+                    title: `Boundary ${index + 1}`,
+                    icon: {
+                        path: google.maps.SymbolPath.CIRCLE,
+                        scale: 5,
+                        fillColor: '#10b981',
+                        fillOpacity: 0.8,
+                        strokeColor: '#ffffff',
+                        strokeWeight: 1.5,
+                    }
+                });
+                state.markers.push(marker);
+            });
+            
+            if (boundaryPoints.length >= 3) {
+                const center = state.mosqueLocation;
+                const sortedPoints = [...boundaryPoints].sort((a, b) => {
+                    const angleA = Math.atan2(a.lng - center.lng, a.lat - center.lat);
+                    const angleB = Math.atan2(b.lng - center.lng, b.lat - center.lat);
+                    return angleA - angleB;
+                });
+                
+                state.polygon = new google.maps.Polygon({
+                    paths: sortedPoints,
+                    strokeColor: '#10b981',
+                    strokeOpacity: 0.8,
+                    strokeWeight: 2,
+                    fillColor: '#10b981',
+                    fillOpacity: 0.15,
+                    map: state.map
+                });
+                
+                const bounds = new google.maps.LatLngBounds();
+                sortedPoints.forEach(point => bounds.extend(point));
+                bounds.extend(state.mosqueLocation);
+                state.map.fitBounds(bounds);
+                
+                const area = google.maps.geometry.spherical.computeArea(sortedPoints) / 1000000;
+                addLog(`📐 Polygon area: ${area.toFixed(2)} km²`, 'success');
+                
+                addLog('✨ Visualization complete!', 'success');
+            }
+        }
+
+        async function calculateRoadAwareIsochrone() {
+            if (!state.apiKey) {
+                setError('Please enter your Google Maps API key first');
+                return;
+            }
+            
+            state.isCalculating = true;
+            setError('');
+            state.logs = [];
+            state.apiCalls = 0;
+            state.boundaries = [];
+            clearVisualization();
+            updateStats();
+            
+            addLog(`🚀 Starting ROAD-AWARE calculation for ${state.timeLimit} minutes`, 'info');
+            
+            elements.calculateBtn.disabled = true;
+            elements.calculateBtnContent.innerHTML = `
+                <span class="spinner"></span> Exploring Roads... (Calls: <span id="apiCallsCount">0</span>)
+            `;
+            
+            if (!state.directionsService) {
+                setError('Google Maps not properly initialized. Please check your API key.');
+                state.isCalculating = false;
+                elements.calculateBtn.disabled = false;
+                elements.calculateBtnContent.innerHTML = `⚡ Calculate ${state.timeLimit}-Minute Road Isochrone`;
+                return;
+            }
+            
+            try {
+                const destinations = await findMajorDestinations(state.mosqueLocation);
+                
+                addLog(`📍 Testing ${Math.min(destinations.length, state.maxApiCalls)} destinations...`, 'info');
+                const boundaryPoints = [];
+                
+                const batchSize = 8;
+                for (let i = 0; i < Math.min(destinations.length, state.maxApiCalls); i += batchSize) {
+                    const batch = destinations.slice(i, i + batchSize);
+                    
+                    const batchResults = await Promise.allSettled(
+                        batch.map(dest => testRouteToDestination(state.mosqueLocation, dest))
+                    );
+                    
+                    batchResults.forEach(result => {
+                        if (result.status === 'fulfilled' && result.value) {
+                            boundaryPoints.push(result.value);
+                        }
+                    });
+                    
+                    const counter = document.getElementById('apiCallsCount');
+                    if (counter) counter.textContent = state.apiCalls;
+                    
+                    if (i + batchSize < destinations.length) {
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                }
+                
+                addLog(`✅ Found ${boundaryPoints.length} boundary points along roads`, 'success');
+                
+                if (boundaryPoints.length >= 3) {
+                    addLog('📍 Filling gaps between points...', 'info');
+                    const additionalPoints = await fillGapsInBoundary(boundaryPoints);
+                    boundaryPoints.push(...additionalPoints);
+                }
+                
+                if (boundaryPoints.length > 0) {
+                    state.boundaries = boundaryPoints;
+                    visualizeResults(boundaryPoints);
+                    updateStats();
+                } else {
+                    setError('No boundary points found. Try adjusting settings or check your API key permissions.');
+                }
+                
+            } catch (err) {
+                addLog(`❌ Critical error: ${err.message}`, 'error');
+                setError(err.message);
+            } finally {
+                state.isCalculating = false;
+                elements.calculateBtn.disabled = false;
+                elements.calculateBtnContent.innerHTML = `⚡ Calculate ${state.timeLimit}-Minute Road Isochrone`;
+            }
+        }
+
+        async function searchForAddress() {
+            if (!state.searchAddress || !window.google) {
+                setError('Please enter an address and ensure Google Maps is loaded');
+                return;
+            }
+            
+            addLog(`🔍 Searching for: ${state.searchAddress}`, 'info');
+            const geocoder = new google.maps.Geocoder();
+            
+            geocoder.geocode({ address: state.searchAddress }, (results, status) => {
+                if (status === 'OK' && results[0]) {
+                    const location = {
+                        lat: results[0].geometry.location.lat(),
+                        lng: results[0].geometry.location.lng()
+                    };
+                    state.mosqueLocation = location;
+                    updateLocationInfo();
+                    addLog(`📍 Found: ${results[0].formatted_address}`, 'success');
+                    
+                    if (state.map) {
+                        state.map.setCenter(location);
+                        state.map.setZoom(11);
+                        
+                        clearVisualization();
+                        clearStartingPointMarker();
+                        
+                        state.startingPointMarker = new google.maps.Marker({
+                            position: location,
+                            map: state.map,
+                            title: 'Starting Point',
+                            icon: {
+                                path: google.maps.SymbolPath.CIRCLE,
+                                scale: 10,
+                                fillColor: '#ef4444',
+                                fillOpacity: 1,
+                                strokeColor: '#ffffff',
+                                strokeWeight: 2,
+                            }
+                        });
+                    }
+                } else {
+                    addLog(`❌ Geocoding failed: ${status}`, 'error');
+                    setError('Could not find location. Try a different address.');
+                }
+            });
+        }
+
+        // Event listeners
+        elements.toggleApiKey.addEventListener('click', () => {
+            elements.apiKey.type = elements.apiKey.type === 'password' ? 'text' : 'password';
+            elements.toggleApiKey.textContent = elements.apiKey.type === 'password' ? '👁️' : '🙈';
+        });
+
+        elements.saveApiKey.addEventListener('click', () => {
+            const apiKey = elements.apiKey.value.trim();
+            if (apiKey) {
+                localStorage.setItem('gmaps_api_key', apiKey);
+                state.apiKey = apiKey;
+                addLog('API key saved to local storage', 'success');
+                loadGoogleMaps();
+            } else {
+                setError('Please enter a valid API key');
+            }
+        });
+
+        elements.apiKey.addEventListener('change', (e) => {
+            state.apiKey = e.target.value;
+            if (state.apiKey) {
+                loadGoogleMaps();
+            }
+        });
+
+        elements.searchAddress.addEventListener('change', (e) => {
+            state.searchAddress = e.target.value;
+        });
+
+        elements.searchAddress.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                searchForAddress();
+            }
+        });
+
+        elements.searchBtn.addEventListener('click', searchForAddress);
+
+        elements.timeLimit.addEventListener('input', (e) => {
+            state.timeLimit = Number(e.target.value);
+            elements.timeLimitValue.textContent = state.timeLimit;
+            elements.calculateBtnContent.innerHTML = `⚡ Calculate ${state.timeLimit}-Minute Road Isochrone`;
+        });
+
+        elements.maxApiCalls.addEventListener('input', (e) => {
+            state.maxApiCalls = Number(e.target.value);
+            elements.maxApiCallsValue.textContent = state.maxApiCalls;
+        });
+
+        elements.clearLogsBtn.addEventListener('click', () => {
+            state.logs = [];
+            renderLogs();
+        });
+
+        elements.calculateBtn.addEventListener('click', () => {
+            if (!state.apiKey) {
+                setError('Please enter your Google Maps API key first');
+                return;
+            }
+            if (state.strategy === 'roads') {
+                calculateRoadAwareIsochrone();
+            } else {
+                addLog('Radial method not implemented in this version', 'error');
+            }
+        });
+
+        elements.strategyRoads.addEventListener('click', () => {
+            state.strategy = 'roads';
+            elements.strategyRoads.classList.add('active');
+            elements.strategyRadial.classList.remove('active');
+        });
+
+        elements.strategyRadial.addEventListener('click', () => {
+            // Disabled for now
+        });
+
+        // Initialize
+        updateLocationInfo();
+        updateStats();
+    </script>
+</body>
+</html>
