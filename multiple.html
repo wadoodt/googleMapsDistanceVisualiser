@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!DOCTYPE html> 
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -37,6 +37,7 @@
     .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:#e5e7eb}
     .toolbar{display:flex;gap:8px;flex-wrap:wrap}
     .usagebar{position:sticky;bottom:0;margin-top:18px;background:#0b1220;color:#e5e7eb;border-radius:12px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 -6px 16px rgba(0,0,0,.08)}
+    select.input{appearance:auto}
   </style>
 </head>
 <body>
@@ -75,6 +76,16 @@
               <input id="timeLimit" class="input" type="number" min="5" max="60" value="15" style="max-width:120px">
               <span class="small">Use 15 for fixed 15‑minute radii.</span>
             </div>
+          </div>
+
+          <!-- Country restriction UI -->
+          <div class="form-group">
+            <label class="form-label">Restrict Geocoding to Country</label>
+            <select id="countrySelect" class="input" style="max-width:320px">
+              <option value="">No restriction</option>
+              <option value="GB" selected>United Kingdom (GB)</option>
+            </select>
+            <div class="small" style="margin-top:6px">When set, ambiguous place names are geocoded <b>only</b> within the selected country. Helpful to avoid e.g. Saint Petersburg (US) vs Saint Petersburg (RU). UK is selected by default.</div>
           </div>
 
           <div class="form-group">
@@ -149,8 +160,7 @@
     </div>
   </div>
 
-  <!-- JSZip + FileSaver for ZIP export (works on GitHub Pages) -->
-  <!-- JSZip + FileSaver (no SRI) -->
+  <!-- JSZip + FileSaver (reliable CDN; no SRI) -->
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
 
@@ -169,7 +179,8 @@
       totalPoints: 0,
       rows: [], // {name:'', address:'', lat:null, lng:null}
       results: [], // per origin { name, origin, points[], polygon, markers[] }
-      palette: ['#10b981','#3b82f6','#f59e0b','#ef4444','#7c3aed','#14b8a6','#f97316','#eab308','#22c55e','#8b5cf6']
+      palette: ['#10b981','#3b82f6','#f59e0b','#ef4444','#7c3aed','#14b8a6','#f97316','#eab308','#22c55e','#8b5cf6'],
+      country: 'GB', // ISO-3166-1 alpha-2. Default to UK as requested.
     };
 
     // ---------- DOM ----------
@@ -199,11 +210,19 @@
       usageCalls: document.getElementById('usageCalls'),
       usagePoints: document.getElementById('usagePoints'),
       usageCost: document.getElementById('usageCost'),
+      countrySelect: document.getElementById('countrySelect'),
     };
 
     // Load saved key
     const savedKey = localStorage.getItem('gmaps_api_key');
     if (savedKey){ state.apiKey = savedKey; el.apiKey.value = savedKey; addLog('API key loaded from local storage','success'); loadGoogleMaps(); }
+
+    // Load saved country pref if any
+    const savedCountry = localStorage.getItem('gmaps_country');
+    if (savedCountry !== null) {
+      state.country = savedCountry || '';
+      if (el.countrySelect) el.countrySelect.value = state.country;
+    }
 
     // ---------- Utils ----------
     function addLog(message,type='info'){
@@ -396,6 +415,7 @@
 
     function saveBlob(data, filename, mime){
       const blob = new Blob([data], {type:mime});
+      if (!window.saveAs) { addLog('Download library (FileSaver) not loaded.','error'); return; }
       saveAs(blob, filename);
     }
 
@@ -408,6 +428,7 @@
 
     async function exportZip(){
       if (!state.results.length){ addLog('Nothing to zip. Run a calculation first.','warning'); return; }
+      if (!window.JSZip || !window.saveAs) { addLog('ZIP/export libraries not loaded.','error'); return; }
       const zip = new JSZip();
       const folder = zip.folder(`isochrones_${state.timeLimit}min`);
       state.results.forEach((r,i)=>{
@@ -427,10 +448,16 @@
       // lat,lng direct
       const m = input.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
       if (m){ return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) }; }
-      // address via geocoder
+      // address via geocoder with country restriction (if any)
       return new Promise((resolve)=>{
-        state.geocoder.geocode({address: input},(res,status)=>{
-          if (status==='OK' && res[0]){
+        const req = { address: input };
+        // Use componentRestrictions for hard filtering, and region for biasing
+        if (state.country) {
+          req.componentRestrictions = { country: state.country }; // e.g., 'GB'
+          req.region = state.country.toLowerCase() === 'gb' ? 'uk' : undefined; // bias for UK ccTLD
+        }
+        state.geocoder.geocode(req,(res,status)=>{
+          if (status==='OK' && res && res[0]){
             const loc = res[0].geometry.location; resolve({ lat: loc.lat(), lng: loc.lng() });
           } else { resolve(null); }
         });
@@ -475,7 +502,7 @@
       state.results = []; state.apiCalls=0; state.totalPoints=0; updateStats();
 
       // Geocode all
-      addLog(`📍 Geocoding ${items.length} location(s)…`);
+      addLog(`📍 Geocoding ${items.length} location(s)… ${state.country?`[country=${state.country}]`:''}`);
       const origins = [];
       for (const it of items){
         const loc = await geocodeOne(it.address);
@@ -531,6 +558,12 @@
     el.saveApiKey.addEventListener('click',()=>{ const k=el.apiKey.value.trim(); if(k){ localStorage.setItem('gmaps_api_key',k); state.apiKey=k; addLog('API key saved','success'); loadGoogleMaps(); } });
     el.apiKey.addEventListener('change', e=>{ state.apiKey=e.target.value; if(state.apiKey) loadGoogleMaps(); });
 
+    el.countrySelect.addEventListener('change', e=>{
+      state.country = e.target.value || '';
+      localStorage.setItem('gmaps_country', state.country);
+      addLog(state.country ? `🌍 Country restriction set to ${state.country}` : '🌍 Country restriction cleared');
+    });
+
     el.addOneBtn.addEventListener('click',()=> addRow());
     el.addFiveBtn.addEventListener('click',()=>{ for(let i=0;i<5;i++) addRow(); });
     el.clearListBtn.addEventListener('click',()=>{ el.rows.innerHTML=''; state.rows=[]; renumberRows(); });
@@ -555,6 +588,15 @@
     addRow('London','London, UK');
     addRow('Manchester','Manchester, UK');
 
+    // Disable export buttons if libs missing
+    document.addEventListener('DOMContentLoaded', () => {
+      const hasZip   = !!window.JSZip;
+      const hasSave  = !!window.saveAs;
+      const exportBtn = document.getElementById('exportAllBtn');
+      const zipBtn    = document.getElementById('zipBtn');
+      if (exportBtn) exportBtn.disabled = !hasSave;
+      if (zipBtn)    zipBtn.disabled    = !(hasZip && hasSave);
+    });
   </script>
 </body>
 </html>
