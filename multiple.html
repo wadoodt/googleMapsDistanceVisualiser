@@ -175,6 +175,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
   <script>
+(function(){
+  // Global error trap to surface JS issues in the Activity Log
+  window.addEventListener('error', (e)=>{
+    try{ const log=document.getElementById('log'); if(log){ log.innerHTML += `<div style="color:#f87171">[ERR] ${e.message}</div>`; } }catch{}
+  });
     // ---------- State ----------
     const state = {
       apiKey: '',
@@ -656,7 +661,7 @@
     // Pre-populate a couple of rows for convenience (UK by default)
     addRow('London','London');
     addRow('Manchester','Manchester');
-
+})();
   </script>
 </body>
 </html>
