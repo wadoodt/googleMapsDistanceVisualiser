@@ -102,6 +102,7 @@
                 <option value="csv_name_address">CSV: name,address</option>
                 <option value="csv_address_only">CSV: address</option>
                 <option value="text_lines">Plain text: one per line</option>
+                <option value="text_name_address">Plain text: name | address</option>
               </select>
 
               <button id="clearListBtn" class="btn-ghost btn" type="button">🧹 Clear</button>
@@ -312,6 +313,23 @@
       return text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(addr=>({name:'', address:addr}));
     }
 
+    function parseLinesNameAddress(text) {
+      return text
+        .split(/\r?\n/)
+        .map(l => l.replace(/^\uFEFF/, '').trim()) // strip BOM + trim
+        .filter(Boolean)
+        .map(line => {
+          // Allow | ; or tab as separators. Avoid comma to protect addresses.
+          const m = line.match(/^(.*?)\s*(?:\||;|\t)\s*(.+)$/);
+          if (!m) return null;
+          const name = m[1].trim();
+          const address = m[2].trim();
+          if (!address) return null;
+          return { name, address };
+        })
+        .filter(Boolean);
+    }
+
     function parseCSV_NameAddress(text){
       return text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(line=>{
         const parts = line.split(',').map(s=>s.trim());
@@ -320,6 +338,14 @@
       }).filter(Boolean);
     }
 
+    function dropHeaderIfPresent(rows) {
+      if (!rows.length) return rows;
+      const first = rows[0];
+      const looksLikeHeader =
+        /name/i.test(first.name || '') && /address|location/i.test(first.address || '');
+      return looksLikeHeader ? rows.slice(1) : rows;
+    }
+    
     function parseCSV_NameAddress(text) {
       return text
         .split(/\r?\n/)
@@ -331,6 +357,8 @@
           return { name: parts[0], address: parts.slice(1).join(',') };
         })
         .filter(Boolean);
+
+      return dropHeaderIfPresent(parsedRows);
     }
     
     function stripBOM(s) {
@@ -351,6 +379,8 @@
         .map(l => stripBOM(l).trim())
         .filter(l => l.length > 0)
         .map(line => ({ name: '', address: unquote(line) }));
+
+      return dropHeaderIfPresent(parsedRows);
     }
 
     function splitCsvLine(line) {
@@ -382,6 +412,8 @@
         if (parts.length>=3) return { name:parts[0], address:`${parts[1]},${parts[2]}` };
         return null;
       }).filter(Boolean);
+
+      return dropHeaderIfPresent(parsedRows);
     }
 
     async function parseFile(file, mode){
@@ -392,6 +424,7 @@
       if (mode === 'csv_name_address') return parseCSV_NameAddress(text);
       if (mode === 'csv_address_only') return parseCSV_AddressOnly(text);
       if (mode === 'text_lines') return parseLines(text);
+      if (mode === 'text_name_address') return parseLinesNameAddress(text);
 
       // Auto-detect: try JSON/GeoJSON first, then CSV/lines
       try{
