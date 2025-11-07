@@ -291,10 +291,8 @@
     function haversineDest(origin, bearingDeg, distanceKm){
       const R=6371, br=bearingDeg*Math.PI/180, lat1=origin.lat*Math.PI/180, lng1=origin.lng*Math.PI/180, d=distanceKm/R;
       const lat2 = Math.asin(Math.sin(lat1)*Math.cos(d)+Math.cos(lat1)*Math.sin(d)*Math.cos(br));
-      const lng2 = lng1 + Math.atan2(Math.sin(Math.sin(d)*Math.cos(lat1)*Math.sin(br)), Math.cos(d)-Math.sin(lat1)*Math.sin(lat2));
-      // correct atan2 formula:
-      const lng2b = lng1 + Math.atan2(Math.sin(br)*Math.sin(d)*Math.cos(lat1), Math.cos(d)-Math.sin(lat1)*Math.sin(lat2));
-      return { lat: lat2*180/Math.PI, lng: lng2b*180/Math.PI };
+      const lng2 = lng1 + Math.atan2(Math.sin(br)*Math.sin(d)*Math.cos(lat1), Math.cos(d)-Math.sin(lat1)*Math.sin(lat2));
+      return { lat: lat2*180/Math.PI, lng: lng2*180/Math.PI };
     }
     function round(n, p=5){ const f=Math.pow(10,p); return Math.round(n*f)/f; }
 
@@ -605,8 +603,13 @@ function buildIntersectionSeeds(origin, radiiKm, ways){
       const exportBtn = document.getElementById('exportAllBtn');
       const zipBtn    = document.getElementById('zipBtn');
       if (exportBtn) exportBtn.disabled = !hasSave;
+      if (zipBtn)    zipBtn.disabled    = !(hasZip && hasSave);
+    });
+      const zipBtn    = document.getElementById('zipBtn');
+      if (exportBtn) exportBtn.disabled = !hasSave;
       if (zipBtn)    exportBtn.disabled = !(hasZip && hasSave);
     });
   </script>
 </body>
 </html>
+
