@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Multi-Origin 15‑Minute Road Isochrones (Road-Intersection Seeding)</title>
-  <meta name="description" content="Upload or enter multiple places and calculate 15‑minute road-aware isochrones for each using Google Maps Directions (Routes). Seed destinations at road intersections with distance rings. Exports GeoJSON and a ZIP of all results."/>
+  <title>Multi-Origin 15‑Minute Road Isochrones (Exact Circle×Road Intersections)</title>
+  <meta name="description" content="Computes exact intersections between distance rings and OpenStreetMap roads in-browser, then runs 15‑minute cutoffs per route. De-duplicates by (road, direction) keeping only the furthest boundary point. Exports centres as red dots in GeoJSON."/>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
@@ -164,12 +164,7 @@
 
         <div class="card">
           <div style="font-weight:700;margin-bottom:8px">How this works</div>
-          <div class="small" style="line-height:1.6;color:var(--slate)">
-            • Generates distance rings around each origin, samples many points, then <b>snaps them to the nearest roads</b> (Roads API).<br>
-            • For each snapped point, requests driving routes and finds the <b>15‑minute boundary point</b> along that route from the origin.<br>
-            • If multiple seeds use the <b>same route</b>, we keep <b>only the furthest 15‑minute point</b> to avoid stacked duplicates.<br>
-            • Sorts points, draws polygons, and exports per‑origin GeoJSON + a combined file. Centres are exported and rendered as <b>red dots</b>.
-          </div>
+          <div class="small" style="line-height:1.6;color:var(--slate)">• For each origin, downloads <b>OpenStreetMap roads</b> in a bounding box, computes <b>exact intersections</b> of distance rings with those roads.<br>• Uses each intersection as a seed: requests driving route and finds the <b>15‑minute boundary point</b> along the route.<br>• <b>De-duplicates</b> by (same road, same direction from centre): keeps <b>only the furthest</b> boundary point; no route-similarity hash anymore.<br>• Sorts points, draws polygons, and exports per‑origin GeoJSON + a combined file. <b>Centres are exported</b> and rendered as <b style="color:#ef4444">red dots</b>.</div>
         </div>
       </div>
     </div>
@@ -303,99 +298,113 @@
     }
     function round(n, p=5){ const f=Math.pow(10,p); return Math.round(n*f)/f; }
 
-    // ---------- Roads API snapping (circle-road intersections) ----------
-    function buildCircleSamples(origin, radiiKm, stepDeg){
-      const pts=[]; for(const r of radiiKm){ for(let a=0; a<360; a+=stepDeg){ pts.push(haversineDest(origin, a, r)); } } return pts;
-    }
-    function batch(arr, n){ const out=[]; for(let i=0;i<arr.length;i+=n) out.push(arr.slice(i,i+n)); return out; }
-    async function snapNearestRoads(points){
-      // Roads API nearestRoads supports up to 100 points per request
-      const batches = batch(points, 100);
-      const snapped=[];
-      for(const b of batches){
-        const ptsParam = b.map(p=>`${p.lat},${p.lng}`).join('|');
-        const url = `https://roads.googleapis.com/v1/nearestRoads?points=${encodeURIComponent(ptsParam)}&key=${encodeURIComponent(state.apiKey)}`;
-        try{
-          const res = await fetch(url);
-          state.apiCalls++; updateStats();
-          if(!res.ok){ addLog(`Roads API error ${res.status}`,'warning'); continue; }
-          const data = await res.json();
-          if(Array.isArray(data.snappedPoints)){
-            for(const sp of data.snappedPoints){ if(sp.location){ snapped.push({ lat: sp.location.latitude, lng: sp.location.longitude }); } }
-          }
-        }catch(e){ addLog('Roads API request failed (CORS or network). Falling back to raw circle samples.','warning'); return points; }
-      }
-      // De‑dupe snapped points that land on the same place (within 30 m)
-      const unique=[]; const tol=30; // meters
-      for(const p of snapped){
-        const ll = new google.maps.LatLng(p.lat, p.lng);
-        if(!unique.some(q=> google.maps.geometry.spherical.computeDistanceBetween(ll, new google.maps.LatLng(q.lat,q.lng)) < tol )){
-          unique.push(p);
+    // ---------- OSM fetching & exact circle×road intersections ----------
+const OSM_OVERPASS = 'https://overpass-api.nextzen.org/api/interpreter'; // public instance with CORS; change if needed
+const OSM_HIGHWAYS = ['motorway','trunk','primary','secondary','tertiary','unclassified','residential','living_street','motorway_link','trunk_link','primary_link','secondary_link','tertiary_link'];
+
+function deg2rad(x){return x*Math.PI/180;} function rad2deg(x){return x*180/Math.PI;}
+function llToXY(ref, ll){ const k = Math.cos(deg2rad(ref.lat)); const x = (ll.lng - ref.lng) * 111320 * k; const y = (ll.lat - ref.lat) * 110540; return {x,y}; }
+function xyToLL(ref, xy){ const k = Math.cos(deg2rad(ref.lat)); const lng = ref.lng + (xy.x/(111320*k)); const lat = ref.lat + (xy.y/110540); return {lat,lng}; }
+
+async function fetchOSMRoadsAround(origin, maxRadiusKm){
+  const padKm = maxRadiusKm + 2; // small pad
+  const dlat = padKm/110.574; const dlng = padKm/(111.320*Math.cos(deg2rad(origin.lat))||1e-6);
+  const south = origin.lat - dlat, north = origin.lat + dlat, west = origin.lng - dlng, east = origin.lng + dlng;
+  const highwayFilter = OSM_HIGHWAYS.map(h=>`"highway"="${h}"`).join('|');
+  const query = `[
+    out:json][timeout:25];(
+      way[highway~"${highwayFilter}"](${south},${west},${north},${east});
+    );(._;>;);out body;`;
+  const res = await fetch(OSM_OVERPASS, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: 'data='+encodeURIComponent(query)});
+  state.apiCalls++; updateStats();
+  if(!res.ok){ throw new Error('Overpass error '+res.status); }
+  const data = await res.json();
+  const nodes = new Map(); (data.elements||[]).filter(e=>e.type==='node').forEach(n=>nodes.set(n.id,{lat:n.lat,lng:n.lon}));
+  const ways = (data.elements||[]).filter(e=>e.type==='way');
+  return ways.map(w=>({ id:w.id, name:(w.tags&& (w.tags.name||w.tags.ref||''))||'', nodes:(w.nodes||[]).map(id=>nodes.get(id)).filter(Boolean), tags:w.tags||{} })).filter(w=>w.nodes.length>=2);
+}
+
+function circleSegmentIntersections(center, radiusM, a, b){
+  // work in local XY (meters)
+  const A=llToXY(center,a), B=llToXY(center,b); const dx=B.x-A.x, dy=B.y-A.y; const dr2=dx*dx+dy*dy; if(dr2===0) return [];
+  const A2=A.x*A.x + A.y*A.y; const R2=radiusM*radiusM;
+  // Parametric line A + t*(B-A), t in [0,1]
+  // Solve |A + tD|^2 = R^2 ⇒ (D·D)t^2 + 2(A·D)t + (A·A - R^2)=0
+  const AD = A.x*dx + A.y*dy; const c = A2 - R2; const a2 = dr2; const b2 = 2*AD; const disc = b2*b2 - 4*a2*c; if (disc < 0) return [];
+  const s = Math.sqrt(Math.max(0,disc)); const t1 = (-b2 + s)/(2*a2); const t2 = (-b2 - s)/(2*a2);
+  const ts = [t1,t2].filter(t=>t>=0 && t<=1);
+  return ts.map(t=> xyToLL(center,{x:A.x + dx*t, y:A.y + dy*t}));
+}
+
+function buildIntersectionSeeds(origin, radiiKm, ways){
+  const seeds=[]; const centreLL = origin; const sector=10; // degrees bin for direction
+  for(const rKm of radiiKm){
+    const rM = rKm*1000;
+    for(const w of ways){
+      const ns = w.nodes;
+      for(let i=0;i<ns.length-1;i++){
+        const p1=ns[i], p2=ns[i+1];
+        const xs = circleSegmentIntersections(centreLL, rM, p1, p2);
+        for(const ll of xs){
+          const br = (Math.atan2(ll.lng-centreLL.lng, ll.lat-centreLL.lat)*180/Math.PI+360)%360;
+          const dir = Math.round(br/sector)*sector;
+          seeds.push({ lat: ll.lat, lng: ll.lng, wayId:w.id, wayName:w.name||'', dir });
         }
       }
-      return unique.length ? unique : points;
     }
+  }
+  // de-dupe intersections that are essentially same spot (e.g., overlapping ways) within 12 m
+  const unique=[]; const tol=12;
+  for(const s of seeds){
+    const ll = new google.maps.LatLng(s.lat,s.lng);
+    if(!unique.some(q=> s.wayId===q.wayId && Math.abs(s.dir-q.dir)<=sector && google.maps.geometry.spherical.computeDistanceBetween(ll, new google.maps.LatLng(q.lat,q.lng))<tol )){
+      unique.push(s);
+    }
+  }
+  return unique;
+}
 
     // ---------- Routes & 15‑minute cutoff ----------
-    function keyForRoute(route){
-      // Build a coarse key from overview_path rounded coordinates at coarse resolution
-      const path = route.overview_path || [];
-      if(!path.length) return 'nokey';
-      const step = Math.max(1, Math.floor(path.length/25));
-      const parts=[]; for(let i=0;i<path.length;i+=step){ parts.push(`${round(path[i].lat(),3)},${round(path[i].lng(),3)}`); }
-      return parts.join(';');
-    }
-
-    async function testRoute(origin, destination){
-      return new Promise((resolve)=>{
-        const req={ origin, destination, travelMode: google.maps.TravelMode.DRIVING, unitSystem: google.maps.UnitSystem.METRIC, provideRouteAlternatives:true };
-        state.directionsService.route(req,(r,status)=>{
-          state.apiCalls++; updateStats();
-          if(status!=='OK' || !r?.routes?.length){ return resolve(null); }
-          const limitMin = state.timeLimit;
-          let best = null; // {point, dist, routeKey}
-          for (const route of r.routes){
-            let accMin=0; let boundary=null;
-            for (const leg of route.legs){
-              for (const step of leg.steps){
-                const stepMin = step.duration.value/60;
-                if (accMin + stepMin <= limitMin){ accMin += stepMin; }
-                else {
-                  const remaining = limitMin - accMin;
-                  const frac = Math.max(0, Math.min(1, remaining/stepMin));
-                  // interpolate along step.path
-                  if (step.path && step.path.length>1){
-                    const totalDist = google.maps.geometry.spherical.computeLength(step.path);
-                    const target = totalDist * frac; let acc=0;
-                    for (let i=0;i<step.path.length-1;i++){
-                      const seg = google.maps.geometry.spherical.computeDistanceBetween(step.path[i], step.path[i+1]);
-                      if (acc + seg >= target){
-                        const segFrac = (target - acc) / seg;
-                        boundary = {
-                          lat: step.path[i].lat() + (step.path[i+1].lat() - step.path[i].lat())*segFrac,
-                          lng: step.path[i].lng() + (step.path[i+1].lng() - step.path[i].lng())*segFrac
-                        };
-                        break;
-                      }
-                      acc += seg;
-                    }
-                  }
-                  if (!boundary){ const s=step.start_location,e=step.end_location; boundary = { lat: s.lat()+(e.lat()-s.lat())*frac, lng: s.lng()+(e.lng()-s.lng())*frac }; }
-                  break;
+    // (Removed) route similarity hash — per user request we no longer de-dupe by route shape.
+    async function testRoute(origin, destination, groupKey){
+  return new Promise((resolve)=>{
+    const req={ origin, destination, travelMode: google.maps.TravelMode.DRIVING, unitSystem: google.maps.UnitSystem.METRIC, provideRouteAlternatives:true };
+    state.directionsService.route(req,(r,status)=>{
+      state.apiCalls++; updateStats();
+      if(status!=='OK' || !r?.routes?.length){ return resolve(null); }
+      const limitMin = state.timeLimit; let best=null;
+      for (const route of r.routes){
+        let accMin=0; let boundary=null;
+        for (const leg of route.legs){
+          for (const step of leg.steps){
+            const stepMin = step.duration.value/60;
+            if (accMin + stepMin <= limitMin){ accMin += stepMin; }
+            else {
+              const remaining = limitMin - accMin; const frac = Math.max(0, Math.min(1, remaining/stepMin));
+              if (step.path && step.path.length>1){
+                const totalDist = google.maps.geometry.spherical.computeLength(step.path); const target = totalDist * frac; let acc=0;
+                for (let i=0;i<step.path.length-1;i++){
+                  const seg = google.maps.geometry.spherical.computeDistanceBetween(step.path[i], step.path[i+1]);
+                  if (acc + seg >= target){ const segFrac = (target - acc) / seg; boundary = { lat: step.path[i].lat() + (step.path[i+1].lat() - step.path[i].lat())*segFrac, lng: step.path[i].lng() + (step.path[i+1].lng() - step.path[i].lng())*segFrac }; break; }
+                  acc += seg;
                 }
               }
-              if (boundary) break;
-            }
-            if (boundary){
-              const dist = google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(origin.lat,origin.lng), new google.maps.LatLng(boundary.lat,boundary.lng));
-              const routeKey = keyForRoute(route);
-              if (!best || dist > best.dist){ best = { point: boundary, dist, routeKey }; }
+              if (!boundary){ const s=step.start_location,e=step.end_location; boundary = { lat: s.lat()+(e.lat()-s.lat())*frac, lng: s.lng()+(e.lng()-s.lng())*frac }; }
+              break;
             }
           }
-          resolve(best);
-        });
-      });
-    }
+          if (boundary) break;
+        }
+        if (boundary){
+          const dist = google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(origin.lat,origin.lng), new google.maps.LatLng(boundary.lat,boundary.lng));
+          if (!best || dist > best.dist){ best = { point: boundary, dist, groupKey };
+          }
+        }
+      }
+      resolve(best);
+    });
+  });
+}
 
     async function fillGaps(center, points){
       const out=[]; if (points.length<3) return out;
@@ -459,27 +468,33 @@
     async function geocodeOne(input){ input = input.trim(); const m = input.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/); if (m){ return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) }; } return new Promise((resolve)=>{ const req = { address: input }; if (state.country) { req.componentRestrictions = { country: state.country }; req.region = state.country.toLowerCase() === 'gb' ? 'uk' : undefined; } state.geocoder.geocode(req,(res,status)=>{ if (status==='OK' && res && res[0]){ const loc = res[0].geometry.location; resolve({ lat: loc.lat(), lng: loc.lng() }); } else { resolve(null); } }); }); }
 
     async function calculateForOrigin({name, origin, color}){
-      addLog(`▶️ ${name||'Origin'}: building distance rings & road intersections…`);
-      // Parse UI rings and step
-      const radiiKm = (el.ringsKm.value||'10,20,30,40').split(',').map(s=>parseFloat(s.trim())).filter(x=>!isNaN(x)&&x>0);
-      const stepDeg = Math.max(2, Math.min(45, parseInt(el.circleStep.value||'10',10)));
-      const circleSamples = buildCircleSamples(origin, radiiKm, stepDeg);
-      const snapped = await snapNearestRoads(circleSamples);
-      addLog(`🚧 ${name||'Origin'}: ${snapped.length} road seeds after snapping`);
+  addLog(`▶️ ${name||'Origin'}: fetching OSM roads & computing circle×road intersections…`);
+  const radiiKm = (el.ringsKm.value||'10,20,30,40').split(',').map(s=>parseFloat(s.trim())).filter(x=>!isNaN(x)&&x>0);
+  const maxR = Math.max(...radiiKm);
+  let ways=[]; try{ ways = await fetchOSMRoadsAround(origin, maxR); addLog(`🗺️ OSM roads: ${ways.length} ways`); } catch(e){ addLog('Overpass/OSM fetch failed — cannot compute exact intersections.','error'); return { name, origin, points:[], polygon:null, markers:[], color }; }
 
-      // Route test against each seed; dedupe by route key keeping furthest 15‑min point
-      const batchSize = 8; const results=[]; const routeBest = new Map();
-      for (let i=0; i<snapped.length && state.apiCalls < state.maxApiCallsPerOrigin; i+=batchSize){
-        const slice = snapped.slice(i, i+batchSize);
-        const res = await Promise.all(slice.map(dest=> testRoute(origin, dest)));
-        for(const r of res){
-          if(!r) continue; // failed
-          // Dedupe by routeKey: keep only furthest boundary from centre
-          const prev = routeBest.get(r.routeKey);
-          if(!prev || r.dist > prev.dist){ routeBest.set(r.routeKey, r); }
-        }
-        if (i+batchSize<snapped.length){ await new Promise(r=>setTimeout(r,150)); }
-      }
+  const seeds = buildIntersectionSeeds(origin, radiiKm, ways);
+  addLog(`➰ Seeds from exact intersections: ${seeds.length}`);
+
+  // Route to each seed; group by (wayId, dir). Keep furthest boundary per group.
+  const groupBest = new Map(); const batchSize=8;
+  for(let i=0;i<seeds.length;i+=batchSize){
+    const slice = seeds.slice(i,i+batchSize);
+    const res = await Promise.all(slice.map(s=>{
+      const key = `${s.wayId}|${s.dir}`; return testRoute(origin, {lat:s.lat,lng:s.lng}, key);
+    }));
+    for(const r of res){ if(!r) continue; const prev = groupBest.get(r.groupKey); if(!prev || r.dist>prev.dist){ groupBest.set(r.groupKey, r); } }
+    if(i+batchSize<seeds.length) await new Promise(r=>setTimeout(r,150));
+  }
+
+  const points = [...groupBest.values()].map(v=>v.point);
+  addLog(`✅ ${name||'Origin'}: ${points.length} unique 15‑minute points after (road,direction) de‑dupe`, 'success');
+
+  if (points.length>=3){ addLog(`🧩 ${name||'Origin'}: filling angular gaps…`); const extra = await fillGaps(origin, points); extra.forEach(p=>points.push(p)); }
+  state.totalPoints += points.length; updateStats();
+  const drawn = drawOriginResult(origin, color, name, points);
+  return { name, origin, points, polygon: drawn.polygon, markers: drawn.markers, color };
+}
 
       // Collect final unique boundary points
       const points = [...routeBest.values()].map(v=>v.point);
