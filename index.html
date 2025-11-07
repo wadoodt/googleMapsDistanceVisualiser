@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Multi-Origin 15‑Minute Road Isochrones (Road-Intersection Seeding)</title>
+  <meta name="description" content="Upload or enter multiple places and calculate 15‑minute road-aware isochrones for each using Google Maps Directions (Routes). Seed destinations at road intersections with distance rings. Exports GeoJSON and a ZIP of all results."/>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    :root{
+      --brand:#2563eb;--brand2:#059669;--ink:#111827;--muted:#6b7280;--card:#fff;--bg:#f3f4f6;
+      --ok:#10b981;--warn:#f59e0b;--err:#ef4444;--violet:#7c3aed;--slate:#334155
+    }
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;background:var(--bg);padding:20px;color:var(--ink)}
+    .container{max-width:1380px;margin:0 auto}
+    .card{background:var(--card);border-radius:14px;box-shadow:0 6px 18px rgba(0,0,0,.06);padding:22px;margin-bottom:16px}
+    .header{background:linear-gradient(100deg,var(--brand2),var(--brand));color:#fff;border-radius:16px;padding:28px;margin-bottom:16px}
+    .header h1{font-size:30px;font-weight:800;margin-bottom:6px}
+    .sub{opacity:.9}
+    .grid{display:grid;gap:16px;grid-template-columns:2fr 3fr}
+    .form-group{margin-bottom:12px}
+    .form-label{display:block;font-size:14px;font-weight:600;color:#374151;margin-bottom:8px}
+    .input{width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:14px}
+    .btn{padding:10px 14px;background:var(--brand);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:.2s;display:inline-flex;align-items:center;gap:8px}
+    .btn:hover:not(:disabled){filter:brightness(0.95)}
+    .btn-ghost{background:#fff;color:var(--brand);border:1px solid #dbeafe}
+    .btn-secondary{background:#6b7280}
+    .btn-warning{background:var(--warn)}
+    .btn-green{background:var(--brand2)}
+    .row{display:flex;gap:8px;align-items:center}
+    .small{font-size:12px;color:#6b7280}
+    .error{background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:10px;color:#991b1b}
+    .log{background:#0b1220;color:#cbd5e1;border-radius:12px;padding:12px;height:200px;overflow:auto;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+    #map{width:100%;height:72vh;border-radius:14px;background:#eef2ff;border:1px solid #e5e7eb}
+    .table{width:100%;border-collapse:separate;border-spacing:0 8px}
+    .table th{font-size:12px;color:#6b7280;text-align:left}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:#e5e7eb}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+    .usagebar{position:sticky;bottom:0;margin-top:18px;background:#0b1220;color:#e5e7eb;border-radius:12px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 -6px 16px rgba(0,0,0,.08)}
+    select.input{appearance:auto}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🛣️ Multi‑Origin 15‑Minute Road Isochrones</h1>
+      <p class="sub">Now seeds test destinations where distance rings intersect the <b>road network</b>, then runs the same 15‑minute cutoff algorithm from each.</p>
+    </div>
+
+    <div class="card" style="background:#fef3c7;border:1px solid #fbbf24">
+      <div class="row" style="align-items:flex-start">
+        <div style="font-size:20px">⚠️</div>
+        <div>
+          <div style="font-weight:700;color:#92400e;margin-bottom:4px">API Key Required</div>
+          <div class="small" style="color:#92400e">Use a Google Maps API key with <b>Directions/Routes</b>, <b>Places</b>, and (optionally) <b>Roads API</b> enabled for best results. Restrict your key. Cost is estimated per call.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div>
+        <div class="card">
+          <div class="form-group">
+            <label class="form-label">Google Maps API Key</label>
+            <div class="row">
+              <input id="apiKey" type="password" class="input" placeholder="Enter your API key…">
+              <button id="toggleApiKey" class="btn-secondary btn" type="button">👁️</button>
+              <button id="saveApiKey" class="btn" type="button">Save Locally</button>
+            </div>
+            <div class="small">Stored only in your browser. Est. per‑call cost assumes $0.005 (Routes). Roads API requests are extra.</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Time Limit (minutes)</label>
+            <div class="row">
+              <input id="timeLimit" class="input" type="number" min="5" max="60" value="15" style="max-width:120px">
+              <span class="small">Use 15 for fixed 15‑minute cutoff.</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Rings & Sampling</label>
+            <div class="row" style="gap:10px;flex-wrap:wrap">
+              <input id="ringsKm" class="input" style="max-width:220px" value="10,20,30,40" />
+              <input id="circleStep" class="input" style="max-width:140px" value="10" />
+            </div>
+            <div class="small" style="margin-top:6px">Rings in km (comma‑separated). Circle sampling step in degrees (smaller → denser). Points are snapped to nearest roads.</div>
+          </div>
+
+          <!-- Country restriction UI -->
+          <div class="form-group">
+            <label class="form-label">Restrict Geocoding to Country</label>
+            <select id="countrySelect" class="input" style="max-width:320px">
+              <option value="">No restriction</option>
+              <option value="GB" selected>United Kingdom (GB)</option>
+            </select>
+            <div class="small" style="margin-top:6px">When set, ambiguous place names are geocoded <b>only</b> within the selected country. UK is selected by default.</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Locations</label>
+            <div class="row toolbar">
+              <button id="addOneBtn" class="btn-ghost btn" type="button">➕ Add 1</button>
+              <button id="addFiveBtn" class="btn-ghost btn" type="button">➕➕ Add 5</button>
+
+              <label class="btn-ghost btn" for="fileInput">📁 Upload List</label>
+              <input id="fileInput" type="file" accept=".txt,.csv,.json,.geojson" style="display:none"/>
+
+              <select id="uploadMode" class="input" style="max-width:320px">
+                <option value="auto" selected>Auto-detect</option>
+                <option value="csv_name_address">CSV: name,address</option>
+                <option value="csv_address_only">CSV: address</option>
+                <option value="text_lines">Plain text: one per line</option>
+                <option value="text_name_address">Plain text: name | address</option>
+              </select>
+
+              <button id="clearListBtn" class="btn-ghost btn" type="button">🧹 Clear</button>
+            </div>
+            <div class="small" style="margin-top:6px">Accepted: <b>JSON/GeoJSON</b> (auto), <b>CSV</b> (<code>name,address</code> or address only), or <b>plain text</b>. Lat/Lng like <code>51.5,-0.12</code> supported.</div>
+          </div>
+
+          <div class="form-group">
+            <table class="table">
+              <thead><tr><th style="width:34px">#</th><th>Name</th><th>Address (or <code>lat,lng</code>)</th><th></th></tr></thead>
+              <tbody id="rows"></tbody>
+            </table>
+            <div class="small" id="listStats">0 locations</div>
+          </div>
+
+          <div class="form-group row toolbar">
+            <button id="calcBtn" class="btn-green btn" type="button">⚡ Calculate Isochrones</button>
+            <button id="exportAllBtn" class="btn-ghost btn" type="button" disabled>⬇️ Export GeoJSON (combined)</button>
+            <button id="zipBtn" class="btn-ghost btn" type="button" disabled>🗜️ Download ZIP (each + combined)</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
+            <div style="font-weight:700">Activity Log</div>
+            <button id="clearLogBtn" class="btn-ghost btn" type="button">Clear</button>
+          </div>
+          <div id="log" class="log"><div style="color:#64748b">Waiting for API key…</div></div>
+        </div>
+
+        <div class="card">
+          <div style="font-weight:700;margin-bottom:10px">Run Summary</div>
+          <div class="row" style="gap:16px;flex-wrap:wrap">
+            <span class="pill">Origins: <b id="statOrigins">0</b></span>
+            <span class="pill">API Calls: <b id="statCalls">0</b></span>
+            <span class="pill">Boundary Points: <b id="statPts">0</b></span>
+            <span class="pill">Est. Cost: <b id="statCost">$0.000</b></span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="toolbar" style="margin-bottom:10px">
+            <button id="resetViewBtn" class="btn-ghost btn" type="button">🔄 Reset View</button>
+            <button id="fullscreenBtn" class="btn-ghost btn" type="button">⤢ Fullscreen</button>
+          </div>
+          <div id="map"></div>
+        </div>
+
+        <div class="card">
+          <div style="font-weight:700;margin-bottom:8px">How this works</div>
+          <div class="small" style="line-height:1.6;color:var(--slate)">
+            • Generates distance rings around each origin, samples many points, then <b>snaps them to the nearest roads</b> (Roads API).<br>
+            • For each snapped point, requests driving routes and finds the <b>15‑minute boundary point</b> along that route from the origin.<br>
+            • If multiple seeds use the <b>same route</b>, we keep <b>only the furthest 15‑minute point</b> to avoid stacked duplicates.<br>
+            • Sorts points, draws polygons, and exports per‑origin GeoJSON + a combined file. Centres are exported and rendered as <b>red dots</b>.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="usagebar">
+      <div>API Calls: <b id="usageCalls">0</b> • Points: <b id="usagePoints">0</b></div>
+      <div>Est. Cost: <b id="usageCost">$0.000</b></div>
+    </div>
+  </div>
+
+  <!-- JSZip + FileSaver (reliable CDN; no SRI) -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+
+  <script>
+    // ---------- State ----------
+    const state = {
+      apiKey: '',
+      map: null,
+      directionsService: null,
+      geocoder: null,
+      timeLimit: 15,
+      estCostPerCall: 0.005,
+      maxApiCallsPerOrigin: 200, // allow more since seeding changed
+      logs: [],
+      apiCalls: 0,
+      totalPoints: 0,
+      rows: [], // {name:'', address:'', lat:null, lng:null}
+      results: [], // per origin { name, origin, points[], polygon, markers[] }
+      palette: ['#10b981','#3b82f6','#f59e0b','#7c3aed','#14b8a6','#f97316','#eab308','#22c55e','#8b5cf6','#06b6d4'],
+      country: 'GB', // default UK
+      uploadMode: 'auto',
+    };
+
+    // ---------- DOM ----------
+    const el = {
+      apiKey: document.getElementById('apiKey'),
+      toggleApiKey: document.getElementById('toggleApiKey'),
+      saveApiKey: document.getElementById('saveApiKey'),
+      timeLimit: document.getElementById('timeLimit'),
+      rows: document.getElementById('rows'),
+      addOneBtn: document.getElementById('addOneBtn'),
+      addFiveBtn: document.getElementById('addFiveBtn'),
+      fileInput: document.getElementById('fileInput'),
+      clearListBtn: document.getElementById('clearListBtn'),
+      listStats: document.getElementById('listStats'),
+      calcBtn: document.getElementById('calcBtn'),
+      exportAllBtn: document.getElementById('exportAllBtn'),
+      zipBtn: document.getElementById('zipBtn'),
+      log: document.getElementById('log'),
+      clearLogBtn: document.getElementById('clearLogBtn'),
+      mapDiv: document.getElementById('map'),
+      resetViewBtn: document.getElementById('resetViewBtn'),
+      fullscreenBtn: document.getElementById('fullscreenBtn'),
+      statOrigins: document.getElementById('statOrigins'),
+      statCalls: document.getElementById('statCalls'),
+      statPts: document.getElementById('statPts'),
+      statCost: document.getElementById('statCost'),
+      usageCalls: document.getElementById('usageCalls'),
+      usagePoints: document.getElementById('usagePoints'),
+      usageCost: document.getElementById('usageCost'),
+      countrySelect: document.getElementById('countrySelect'),
+      uploadMode: document.getElementById('uploadMode'),
+      ringsKm: document.getElementById('ringsKm'),
+      circleStep: document.getElementById('circleStep'),
+    };
+
+    // Load saved key
+    const savedKey = localStorage.getItem('gmaps_api_key');
+    if (savedKey){ state.apiKey = savedKey; el.apiKey.value = savedKey; addLog('API key loaded from local storage','success'); loadGoogleMaps(); }
+
+    // Load saved country pref
+    const savedCountry = localStorage.getItem('gmaps_country');
+    if (savedCountry !== null) { state.country = savedCountry || ''; if (el.countrySelect) el.countrySelect.value = state.country; }
+
+    const savedUploadMode = localStorage.getItem('upload_mode');
+    if (savedUploadMode){ state.uploadMode = savedUploadMode; if (el.uploadMode) el.uploadMode.value = savedUploadMode; }
+
+    // ---------- Utils ----------
+    function addLog(message,type='info'){
+      const timestamp = new Date().toLocaleTimeString();
+      state.logs.push({message,type,timestamp});
+      console.log(`[${type}] ${message}`);
+      el.log.innerHTML = state.logs.map(l=>`<div style="color:${
+        l.type==='error'?'#f87171':l.type==='success'?'#34d399':l.type==='warning'?'#fbbf24':'#cbd5e1' }">[${l.timestamp}] ${l.message}</div>`).join('');
+      el.log.scrollTop = el.log.scrollHeight;
+    }
+    function updateStats(){
+      const cost = state.apiCalls * state.estCostPerCall;
+      el.statOrigins.textContent = state.results.length;
+      el.statCalls.textContent = state.apiCalls;
+      el.statPts.textContent = state.totalPoints;
+      el.statCost.textContent = `$${cost.toFixed(3)}`;
+      el.usageCalls.textContent = state.apiCalls;
+      el.usagePoints.textContent = state.totalPoints;
+      el.usageCost.textContent = `$${cost.toFixed(3)}`;
+    }
+
+    function addRow(name = '', address = '') {
+      const idx = state.rows.length + 1;
+      const tr = document.createElement('tr');
+      const tdIdx = document.createElement('td'); tdIdx.className = 'small'; tdIdx.textContent = idx;
+      const tdName = document.createElement('td'); const nameInput = document.createElement('input'); nameInput.className = 'input name'; nameInput.placeholder = 'Name (optional)'; nameInput.value = name; tdName.appendChild(nameInput);
+      const tdAddr = document.createElement('td'); const addrInput = document.createElement('input'); addrInput.className = 'input address'; addrInput.placeholder = 'Address or lat,lng'; addrInput.value = address; tdAddr.appendChild(addrInput);
+      const tdRemove = document.createElement('td'); const removeBtn = document.createElement('button'); removeBtn.className = 'btn-ghost btn remove'; removeBtn.type = 'button'; removeBtn.textContent = '✖'; tdRemove.appendChild(removeBtn);
+      tr.append(tdIdx, tdName, tdAddr, tdRemove); el.rows.appendChild(tr);
+      state.rows.push(tr); el.listStats.textContent = `${state.rows.length} locations`;
+      removeBtn.addEventListener('click', () => { tr.remove(); state.rows = state.rows.filter(r => r !== tr); renumberRows(); });
+    }
+    function renumberRows(){ [...el.rows.children].forEach((tr,i)=> tr.children[0].textContent = i+1); el.listStats.textContent = `${state.rows.length} locations`; }
+
+    // ---- Parsing helpers ---- (same as before; trimmed for brevity but feature-complete)
+    function parseLines(text){ return text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(addr=>({name:'', address:addr})); }
+    function parseLinesNameAddress(text){ return text.split(/\r?\n/).map(l=>l.replace(/^\uFEFF/, '').trim()).filter(Boolean).map(line=>{ const m=line.match(/^(.*?)\s*(?:\||;|\t)\s*(.+)$/); if(!m) return null; return {name:m[1].trim(), address:m[2].trim()}; }).filter(Boolean); }
+    function stripBOM(s){ return s.replace(/^\uFEFF/, ''); }
+    function unquote(s){ if(s.startsWith('"')&&s.endsWith('"')) s=s.slice(1,-1).replace(/""/g,'"'); return s; }
+    function splitCsvLine(line){ line=stripBOM(line); const fields=[]; let cur='',inQ=false; for(let i=0;i<line.length;i++){ const ch=line[i]; if(ch==='"'){ if(inQ&&line[i+1]==='"'){cur+='"'; i++;} else inQ=!inQ; } else if(ch===','&&!inQ){ fields.push(cur.trim()); cur=''; } else { cur+=ch; } } fields.push(cur.trim()); return fields; }
+    function parseCSV_NameAddress(text){ return text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(line=>{ const parts=splitCsvLine(line); if(parts.length<2) return null; return {name:parts[0], address:parts.slice(1).join(',')}; }).filter(Boolean); }
+    function parseCSV_AddressOnly(text){ return text.split(/\r?\n/).map(l=>stripBOM(l).trim()).filter(l=>l.length>0).map(line=>({name:'', address:unquote(line)})); }
+    function parseCSV_Auto(text){ return text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(line=>{ const parts=splitCsvLine(line); if(parts.length===1) return {name:'',address:parts[0]}; if(parts.length===2) return {name:parts[0],address:parts[1]}; if(parts.length>=3) return {name:parts[0],address:`${parts[1]},${parts[2]}`}; return null; }).filter(Boolean); }
+    async function parseFile(file, mode){ const text = await file.text(); mode = mode || state.uploadMode || 'auto'; if(mode==='csv_name_address') return parseCSV_NameAddress(text); if(mode==='csv_address_only') return parseCSV_AddressOnly(text); if(mode==='text_lines') return parseLines(text); if(mode==='text_name_address') return parseLinesNameAddress(text); try{ const data=JSON.parse(text); if(Array.isArray(data)){ return data.map(o=>({ name:o.name||'', address: o.address || (o.lat!=null&&o.lng!=null? `${o.lat},${o.lng}` : '') })).filter(o=>o.address); } if(data && data.type && data.type.toLowerCase()==='featurecollection' && Array.isArray(data.features)){ return data.features.map(f=>{ const props=f.properties||{}; const g=f.geometry||{}; if(g.type==='Point' && Array.isArray(g.coordinates)){ return { name: props.name||'', address:`${g.coordinates[1]},${g.coordinates[0]}` }; } const addr=props.address||props.location||''; return addr? {name:props.name||'', address:addr}: null; }).filter(Boolean); } }catch{} return parseCSV_Auto(text); }
+
+    // ---------- Geo helpers ----------
+    function haversineDest(origin, bearingDeg, distanceKm){
+      const R=6371, br=bearingDeg*Math.PI/180, lat1=origin.lat*Math.PI/180, lng1=origin.lng*Math.PI/180, d=distanceKm/R;
+      const lat2 = Math.asin(Math.sin(lat1)*Math.cos(d)+Math.cos(lat1)*Math.sin(d)*Math.cos(br));
+      const lng2 = lng1 + Math.atan2(Math.sin(Math.sin(d)*Math.cos(lat1)*Math.sin(br)), Math.cos(d)-Math.sin(lat1)*Math.sin(lat2));
+      // correct atan2 formula:
+      const lng2b = lng1 + Math.atan2(Math.sin(br)*Math.sin(d)*Math.cos(lat1), Math.cos(d)-Math.sin(lat1)*Math.sin(lat2));
+      return { lat: lat2*180/Math.PI, lng: lng2b*180/Math.PI };
+    }
+    function round(n, p=5){ const f=Math.pow(10,p); return Math.round(n*f)/f; }
+
+    // ---------- Roads API snapping (circle-road intersections) ----------
+    function buildCircleSamples(origin, radiiKm, stepDeg){
+      const pts=[]; for(const r of radiiKm){ for(let a=0; a<360; a+=stepDeg){ pts.push(haversineDest(origin, a, r)); } } return pts;
+    }
+    function batch(arr, n){ const out=[]; for(let i=0;i<arr.length;i+=n) out.push(arr.slice(i,i+n)); return out; }
+    async function snapNearestRoads(points){
+      // Roads API nearestRoads supports up to 100 points per request
+      const batches = batch(points, 100);
+      const snapped=[];
+      for(const b of batches){
+        const ptsParam = b.map(p=>`${p.lat},${p.lng}`).join('|');
+        const url = `https://roads.googleapis.com/v1/nearestRoads?points=${encodeURIComponent(ptsParam)}&key=${encodeURIComponent(state.apiKey)}`;
+        try{
+          const res = await fetch(url);
+          state.apiCalls++; updateStats();
+          if(!res.ok){ addLog(`Roads API error ${res.status}`,'warning'); continue; }
+          const data = await res.json();
+          if(Array.isArray(data.snappedPoints)){
+            for(const sp of data.snappedPoints){ if(sp.location){ snapped.push({ lat: sp.location.latitude, lng: sp.location.longitude }); } }
+          }
+        }catch(e){ addLog('Roads API request failed (CORS or network). Falling back to raw circle samples.','warning'); return points; }
+      }
+      // De‑dupe snapped points that land on the same place (within 30 m)
+      const unique=[]; const tol=30; // meters
+      for(const p of snapped){
+        const ll = new google.maps.LatLng(p.lat, p.lng);
+        if(!unique.some(q=> google.maps.geometry.spherical.computeDistanceBetween(ll, new google.maps.LatLng(q.lat,q.lng)) < tol )){
+          unique.push(p);
+        }
+      }
+      return unique.length ? unique : points;
+    }
+
+    // ---------- Routes & 15‑minute cutoff ----------
+    function keyForRoute(route){
+      // Build a coarse key from overview_path rounded coordinates at coarse resolution
+      const path = route.overview_path || [];
+      if(!path.length) return 'nokey';
+      const step = Math.max(1, Math.floor(path.length/25));
+      const parts=[]; for(let i=0;i<path.length;i+=step){ parts.push(`${round(path[i].lat(),3)},${round(path[i].lng(),3)}`); }
+      return parts.join(';');
+    }
+
+    async function testRoute(origin, destination){
+      return new Promise((resolve)=>{
+        const req={ origin, destination, travelMode: google.maps.TravelMode.DRIVING, unitSystem: google.maps.UnitSystem.METRIC, provideRouteAlternatives:true };
+        state.directionsService.route(req,(r,status)=>{
+          state.apiCalls++; updateStats();
+          if(status!=='OK' || !r?.routes?.length){ return resolve(null); }
+          const limitMin = state.timeLimit;
+          let best = null; // {point, dist, routeKey}
+          for (const route of r.routes){
+            let accMin=0; let boundary=null;
+            for (const leg of route.legs){
+              for (const step of leg.steps){
+                const stepMin = step.duration.value/60;
+                if (accMin + stepMin <= limitMin){ accMin += stepMin; }
+                else {
+                  const remaining = limitMin - accMin;
+                  const frac = Math.max(0, Math.min(1, remaining/stepMin));
+                  // interpolate along step.path
+                  if (step.path && step.path.length>1){
+                    const totalDist = google.maps.geometry.spherical.computeLength(step.path);
+                    const target = totalDist * frac; let acc=0;
+                    for (let i=0;i<step.path.length-1;i++){
+                      const seg = google.maps.geometry.spherical.computeDistanceBetween(step.path[i], step.path[i+1]);
+                      if (acc + seg >= target){
+                        const segFrac = (target - acc) / seg;
+                        boundary = {
+                          lat: step.path[i].lat() + (step.path[i+1].lat() - step.path[i].lat())*segFrac,
+                          lng: step.path[i].lng() + (step.path[i+1].lng() - step.path[i].lng())*segFrac
+                        };
+                        break;
+                      }
+                      acc += seg;
+                    }
+                  }
+                  if (!boundary){ const s=step.start_location,e=step.end_location; boundary = { lat: s.lat()+(e.lat()-s.lat())*frac, lng: s.lng()+(e.lng()-s.lng())*frac }; }
+                  break;
+                }
+              }
+              if (boundary) break;
+            }
+            if (boundary){
+              const dist = google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(origin.lat,origin.lng), new google.maps.LatLng(boundary.lat,boundary.lng));
+              const routeKey = keyForRoute(route);
+              if (!best || dist > best.dist){ best = { point: boundary, dist, routeKey }; }
+            }
+          }
+          resolve(best);
+        });
+      });
+    }
+
+    async function fillGaps(center, points){
+      const out=[]; if (points.length<3) return out;
+      const sorted=[...points].sort((a,b)=>{ const A=Math.atan2(a.lng-center.lng, a.lat-center.lat); const B=Math.atan2(b.lng-center.lng, b.lat-center.lat); return A-B; });
+      for(let i=0;i<sorted.length;i++){
+        const j=(i+1)%sorted.length, p1=sorted[i], p2=sorted[j];
+        let a1=Math.atan2(p1.lng-center.lng, p1.lat-center.lat)*180/Math.PI;
+        let a2=Math.atan2(p2.lng-center.lng, p2.lat-center.lat)*180/Math.PI;
+        let diff=a2-a1; if(diff<0) diff+=360;
+        if (diff>30){
+          const mid=(a1+diff/2)%360;
+          const test = haversineDest(center, mid, 25);
+          const r = await testRoute(center, test);
+          if (r?.point) out.push(r.point);
+        }
+      }
+      return out;
+    }
+
+    function sortClockwise(center, pts){
+      return [...pts].sort((a,b)=>{ const A=Math.atan2(a.lng-center.lng, a.lat-center.lat); const B=Math.atan2(b.lng-center.lng, b.lat-center.lat); return A-B; });
+    }
+
+    function drawOriginResult(origin, color, name, points){
+      const markers=[];
+      // draw boundary points
+      points.forEach((p,i)=>{ const m=new google.maps.Marker({ position:p, map:state.map, title:`${name||'Origin'} — point ${i+1}`, icon:{path:google.maps.SymbolPath.CIRCLE, scale:5, fillColor:color, fillOpacity:.9, strokeColor:'#fff', strokeWeight:1.5}}); markers.push(m); });
+      let polygon=null;
+      if (points.length>=3){
+        const sorted=sortClockwise(origin, points);
+        polygon = new google.maps.Polygon({ paths:sorted, strokeColor:color, strokeOpacity:.95, strokeWeight:2, fillColor:color, fillOpacity:.18, map:state.map });
+        const bounds = new google.maps.LatLngBounds(); sorted.forEach(pt=>bounds.extend(pt)); bounds.extend(origin); state.map.fitBounds(bounds);
+      }
+      return { markers, polygon };
+    }
+
+    function toGeoJSONFeatureCollection(origins){
+      const features=[];
+      for (const o of origins){
+        if (o.polygon){
+          const path = o.polygon.getPath().getArray().map(ll=>[ll.lng(), ll.lat()]);
+          if (path.length){ features.push({type:'Feature', properties:{type:'isochrone', minutes: state.timeLimit, name:o.name}, geometry:{type:'Polygon', coordinates:[ [...path, path[0]] ]}}); }
+        }
+        if (o.points?.length){
+          features.push({type:'Feature', properties:{type:'boundary-points', name:o.name}, geometry:{type:'MultiPoint', coordinates:o.points.map(p=>[p.lng,p.lat])}});
+        }
+        if (o.origin){
+          // Export centres explicitly and consistently
+          features.push({type:'Feature', properties:{type:'centre', name:o.name, color:'#ef4444'}, geometry:{type:'Point', coordinates:[o.origin.lng, o.origin.lat]}});
+        }
+      }
+      return { type:'FeatureCollection', features };
+    }
+
+    function saveBlob(data, filename, mime){ const blob = new Blob([data], {type:mime}); if (!window.saveAs) { addLog('Download library (FileSaver) not loaded.','error'); return; } saveAs(blob, filename); }
+
+    async function exportCombined(){ const fc = toGeoJSONFeatureCollection(state.results); if (!fc.features.length){ addLog('Nothing to export. Run a calculation first.','warning'); return; } saveBlob(JSON.stringify(fc,null,2), `isochrones_${state.timeLimit}min_combined.geojson`, 'application/geo+json'); addLog('⬇️ Exported combined GeoJSON','success'); }
+
+    async function exportZip(){ if (!state.results.length){ addLog('Nothing to zip. Run a calculation first.','warning'); return; } if (!window.JSZip || !window.saveAs) { addLog('ZIP/export libraries not loaded.','error'); return; } const zip = new JSZip(); const folder = zip.folder(`isochrones_${state.timeLimit}min`); state.results.forEach((r,i)=>{ const base = (r.name||`origin_${i+1}`).replace(/[^a-z0-9_\-]+/gi,'_'); const fc = toGeoJSONFeatureCollection([r]); folder.file(`${base}.geojson`, JSON.stringify(fc,null,2)); }); const combined = toGeoJSONFeatureCollection(state.results); folder.file(`combined.geojson`, JSON.stringify(combined,null,2)); const content = await zip.generateAsync({type:'blob'}); saveAs(content, `isochrones_${state.timeLimit}min.zip`); addLog('🗜️ Downloaded ZIP with all results','success'); }
+
+    async function geocodeOne(input){ input = input.trim(); const m = input.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/); if (m){ return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) }; } return new Promise((resolve)=>{ const req = { address: input }; if (state.country) { req.componentRestrictions = { country: state.country }; req.region = state.country.toLowerCase() === 'gb' ? 'uk' : undefined; } state.geocoder.geocode(req,(res,status)=>{ if (status==='OK' && res && res[0]){ const loc = res[0].geometry.location; resolve({ lat: loc.lat(), lng: loc.lng() }); } else { resolve(null); } }); }); }
+
+    async function calculateForOrigin({name, origin, color}){
+      addLog(`▶️ ${name||'Origin'}: building distance rings & road intersections…`);
+      // Parse UI rings and step
+      const radiiKm = (el.ringsKm.value||'10,20,30,40').split(',').map(s=>parseFloat(s.trim())).filter(x=>!isNaN(x)&&x>0);
+      const stepDeg = Math.max(2, Math.min(45, parseInt(el.circleStep.value||'10',10)));
+      const circleSamples = buildCircleSamples(origin, radiiKm, stepDeg);
+      const snapped = await snapNearestRoads(circleSamples);
+      addLog(`🚧 ${name||'Origin'}: ${snapped.length} road seeds after snapping`);
+
+      // Route test against each seed; dedupe by route key keeping furthest 15‑min point
+      const batchSize = 8; const results=[]; const routeBest = new Map();
+      for (let i=0; i<snapped.length && state.apiCalls < state.maxApiCallsPerOrigin; i+=batchSize){
+        const slice = snapped.slice(i, i+batchSize);
+        const res = await Promise.all(slice.map(dest=> testRoute(origin, dest)));
+        for(const r of res){
+          if(!r) continue; // failed
+          // Dedupe by routeKey: keep only furthest boundary from centre
+          const prev = routeBest.get(r.routeKey);
+          if(!prev || r.dist > prev.dist){ routeBest.set(r.routeKey, r); }
+        }
+        if (i+batchSize<snapped.length){ await new Promise(r=>setTimeout(r,150)); }
+      }
+
+      // Collect final unique boundary points
+      const points = [...routeBest.values()].map(v=>v.point);
+      addLog(`✅ ${name||'Origin'}: ${points.length} unique 15‑minute points (duplicated routes removed)`, 'success');
+
+      if (points.length>=3){
+        addLog(`🧩 ${name||'Origin'}: filling angular gaps…`);
+        const extra = await fillGaps(origin, points); extra.forEach(p=>points.push(p));
+      }
+      state.totalPoints += points.length; updateStats();
+      const drawn = drawOriginResult(origin, color, name, points);
+      return { name, origin, points, polygon: drawn.polygon, markers: drawn.markers, color };
+    }
+
+    async function runCalculation(){
+      if (!state.apiKey || !window.google){ addLog('Enter API key and ensure Google Maps loaded.','error'); return; }
+      const timeVal = parseInt(el.timeLimit.value,10)||15; state.timeLimit = timeVal; updateStats();
+
+      // Collect inputs
+      const items = [...el.rows.querySelectorAll('tr')].map(tr=>({ name: tr.querySelector('.name').value.trim(), address: tr.querySelector('.address').value.trim() })).filter(x=>x.address);
+      if (!items.length){ addLog('Add at least one location.','warning'); return; }
+
+      // Reset previous
+      state.results.forEach(r=>{ r.markers?.forEach(m=>m.setMap(null)); r.polygon?.setMap(null); });
+      state.results = []; state.apiCalls=0; state.totalPoints=0; updateStats();
+
+      // Geocode all
+      addLog(`📍 Geocoding ${items.length} location(s)… ${state.country?`[country=${state.country}]`:''}`);
+      const origins = [];
+      for (const it of items){ const loc = await geocodeOne(it.address); if (!loc){ addLog(`❌ Geocode failed for: ${it.address}`,'error'); continue; } origins.push({ name: it.name||it.address, origin: loc }); }
+      if (!origins.length){ addLog('No valid origins to process.','error'); return; }
+
+      // Fit map & draw centre markers (RED as requested)
+      const bounds = new google.maps.LatLngBounds(); origins.forEach(o=> bounds.extend(o.origin)); state.map.fitBounds(bounds);
+
+      let idx=0;
+      for (const o of origins){
+        const color = state.palette[idx % state.palette.length]; idx++;
+        // centre marker in red
+        const centreMarker = new google.maps.Marker({ position:o.origin, map:state.map, title:o.name, icon:{ path:google.maps.SymbolPath.CIRCLE, scale:8, fillColor:'#ef4444', fillOpacity:1, strokeColor:'#fff', strokeWeight:2 } });
+        const res = await calculateForOrigin({name:o.name, origin:o.origin, color});
+        res.markers.push(centreMarker);
+        state.results.push(res);
+      }
+
+      // Enable exports
+      el.exportAllBtn.disabled = false;
+      el.zipBtn.disabled = false;
+      addLog('✨ All origins processed.','success');
+    }
+
+    // ---------- Google Maps boot ----------
+    function loadGoogleMaps(){
+      if (!state.apiKey){ addLog('Please enter your Google Maps API key','warning'); return; }
+      if (window.google?.maps){ initMap(); return; }
+      addLog('Loading Google Maps script…');
+      const s=document.createElement('script');
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${state.apiKey}&libraries=geometry,places`;
+      s.async=true; s.onload=()=>{ addLog('Google Maps loaded','success'); initMap(); };
+      s.onerror=()=> addLog('Failed to load Google Maps','error');
+      document.body.appendChild(s);
+    }
+    function initMap(){
+      if (state.map) return;
+      state.map = new google.maps.Map(el.mapDiv,{ center:{lat:51.5074,lng:-0.1278}, zoom:6, fullscreenControl:true, streetViewControl:false, mapTypeControl:false, styles:[{featureType:'poi',stylers:[{visibility:'off'}]},{featureType:'transit',stylers:[{visibility:'off'}]}] });
+      state.directionsService = new google.maps.DirectionsService();
+      state.geocoder = new google.maps.Geocoder();
+    }
+
+    // ---------- Events ----------
+    el.toggleApiKey.addEventListener('click',()=>{ el.apiKey.type = el.apiKey.type==='password' ? 'text' : 'password'; el.toggleApiKey.textContent = el.apiKey.type==='password' ? '👁️' : '🙈'; });
+    el.saveApiKey.addEventListener('click',()=>{ const k=el.apiKey.value.trim(); if(k){ localStorage.setItem('gmaps_api_key',k); state.apiKey=k; addLog('API key saved','success'); loadGoogleMaps(); } });
+    el.apiKey.addEventListener('change', e=>{ state.apiKey=e.target.value; if(state.apiKey) loadGoogleMaps(); });
+
+    el.countrySelect.addEventListener('change', e=>{ state.country = e.target.value || ''; localStorage.setItem('gmaps_country', state.country); addLog(state.country ? `🌍 Country restriction set to ${state.country}` : '🌍 Country restriction cleared'); });
+
+    el.uploadMode.addEventListener('change', e=>{ state.uploadMode = e.target.value; localStorage.setItem('upload_mode', state.uploadMode); addLog(`📄 Upload mode: ${state.uploadMode}`); });
+
+    el.addOneBtn.addEventListener('click',()=> addRow());
+    el.addFiveBtn.addEventListener('click',()=>{ for(let i=0;i<5;i++) addRow(); });
+    el.clearListBtn.addEventListener('click',()=>{ el.rows.innerHTML=''; state.rows=[]; renumberRows(); });
+
+    el.fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0]; if (!file) return;
+      el.rows.innerHTML = ''; state.rows = []; renumberRows();
+      const list = await parseFile(file, state.uploadMode);
+      list.forEach(item => addRow(item.name || '', item.address || ''));
+      addLog(`📥 Loaded ${list.length} from file (${state.uploadMode})`, 'success');
+      e.target.value = '';
+    });
+
+    el.calcBtn.addEventListener('click', runCalculation);
+    el.exportAllBtn.addEventListener('click', exportCombined);
+    el.zipBtn.addEventListener('click', exportZip);
+
+    el.clearLogBtn.addEventListener('click',()=>{ state.logs=[]; addLog('Logs cleared','info'); });
+    el.resetViewBtn.addEventListener('click',()=>{ if(state.map){ state.map.setCenter({lat:51.5074,lng:-0.1278}); state.map.setZoom(6); } });
+    el.fullscreenBtn.addEventListener('click',()=>{ const card = el.mapDiv.parentElement; if (!document.fullscreenElement){ (card.requestFullscreen ? card.requestFullscreen() : el.mapDiv.requestFullscreen?.()); } else { document.exitFullscreen?.(); }});
+
+    // Pre-populate a couple of rows
+    addRow('London','London, UK');
+    addRow('Manchester','Manchester, UK');
+
+    // Disable export buttons if libs missing
+    document.addEventListener('DOMContentLoaded', () => {
+      const hasZip   = !!window.JSZip;
+      const hasSave  = !!window.saveAs;
+      const exportBtn = document.getElementById('exportAllBtn');
+      const zipBtn    = document.getElementById('zipBtn');
+      if (exportBtn) exportBtn.disabled = !hasSave;
+      if (zipBtn)    exportBtn.disabled = !(hasZip && hasSave);
+    });
+  </script>
+</body>
+</html>
