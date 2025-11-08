@@ -538,7 +538,7 @@
       return { lat: lat2*180/Math.PI, lng: lng2*180/Math.PI };
     }
 
-    function dedupeByAngle(center, points, toleranceDeg = 2.5) {
+    function dedupeByAngle(center, points, toleranceDeg = 5) {
       if (!points || points.length < 2) return points;
 
       const centerLL = new google.maps.LatLng(center.lat, center.lng);
@@ -782,8 +782,10 @@
 
     async function calculateForOrigin({name, origin, color, props}){
       addLog(`▶️ ${name||'Origin'}: generating test destinations…`);
-      const distances=[10,20,30,40];
-      const angles=[0,30,60,90,120,150,180,210,240,270,300,330];
+      // Increased resolution: finer angle spacing (every 10°) and more distance rings
+      const distances = [10, 15, 20, 25, 30, 35]; // in km
+      const angles = Array.from({length: 36}, (_, i) => i * 10); // 0°,10°,20°,...,350°
+
       const tests=[]; angles.forEach(a=>distances.forEach(km=>tests.push(haversineDest(origin, a, km))));
       const points=[]; const batch=8;
       for (let i=0;i<tests.length; i+=batch){
@@ -801,7 +803,7 @@
       }
 
       const before = points.length;
-      let filtered = dedupeByAngle(origin, points, 5);
+      let filtered = dedupeByAngle(origin, points, 2.5); #Testlevel
       const removed = before - filtered.length;
       if (removed > 0) {
         addLog(`🧹 ${name || 'Origin'}: removed ${removed} near-duplicate point(s) within 5° (kept farthest).`, 'success');
