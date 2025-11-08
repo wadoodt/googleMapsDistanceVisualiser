@@ -782,9 +782,13 @@
 
     async function calculateForOrigin({name, origin, color, props}){
       addLog(`▶️ ${name||'Origin'}: generating test destinations…`);
-      // Increased resolution: finer angle spacing (every 10°) and more distance rings
-      const distances = [10, 15, 20, 25, 30, 35]; // in km
-      const angles = Array.from({length: 36}, (_, i) => i * 10); // 0°,10°,20°,...,350°
+      const distances = [10, 15, 20, 25, 30, 35]; // kilometers
+      const angles = [
+        0, 10, 20, 30, 40, 50, 60, 70, 80, 90,
+        100, 110, 120, 130, 140, 150, 160, 170, 180, 190,
+        200, 210, 220, 230, 240, 250, 260, 270, 280, 290,
+        300, 310, 320, 330, 340, 350
+      ];
 
       const tests=[]; angles.forEach(a=>distances.forEach(km=>tests.push(haversineDest(origin, a, km))));
       const points=[]; const batch=8;
@@ -803,7 +807,7 @@
       }
 
       const before = points.length;
-      let filtered = dedupeByAngle(origin, points, 2.5); #Testlevel
+      let filtered = dedupeByAngle(origin, points, 5);
       const removed = before - filtered.length;
       if (removed > 0) {
         addLog(`🧹 ${name || 'Origin'}: removed ${removed} near-duplicate point(s) within 5° (kept farthest).`, 'success');
