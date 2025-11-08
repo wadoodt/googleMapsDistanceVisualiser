@@ -538,7 +538,7 @@
       return { lat: lat2*180/Math.PI, lng: lng2*180/Math.PI };
     }
 
-    function dedupeByAngle(center, points, toleranceDeg = 5) {
+    function dedupeByAngle(center, points, toleranceDeg = 2.5) {
       if (!points || points.length < 2) return points;
 
       const centerLL = new google.maps.LatLng(center.lat, center.lng);
