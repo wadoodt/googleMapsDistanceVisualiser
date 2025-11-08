@@ -807,7 +807,7 @@
       }
 
       const before = points.length;
-      let filtered = dedupeByAngle(origin, points, 3);
+      let filtered = dedupeByAngle(origin, points, 5);
       const removed = before - filtered.length;
       if (removed > 0) {
         addLog(`🧹 ${name || 'Origin'}: removed ${removed} near-duplicate point(s) within 5° (kept farthest).`, 'success');
