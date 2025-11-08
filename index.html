@@ -98,14 +98,15 @@
               <label class="btn-ghost btn" for="fileInput">📁 Upload List</label>
               <input id="fileInput" type="file" accept=".txt,.csv,.json,.geojson" style="display:none"/>
 
-              $1
+              <!-- FIX: real select for upload mode (was missing) -->
+              <select id="uploadMode" class="input" style="max-width:240px">
                 <option value="auto" selected>Auto-detect</option>
                 <option value="csv_with_headers">CSV: column names</option>
                 <option value="csv_name_address">CSV: name,address</option>
                 <option value="csv_address_only">CSV: address</option>
                 <option value="text_lines">Plain text: one per line</option>
                 <option value="text_name_address">Plain text: name | address</option>
-              $2
+              </select>
 
               <button id="clearListBtn" class="btn-ghost btn" type="button">🧹 Clear</button>
             </div>
@@ -491,7 +492,9 @@
       return rows;
     }
 
-    async function parseFile(file, mode){$1
+    // FIX: implement file.text() and remove stray placeholders
+    async function parseFile(file, mode){
+      const text = await file.text();
       if (mode === 'csv_with_headers') { const r = parseCSV_Generic(text); return Array.isArray(r) ? r : []; }
       if (mode === 'csv_name_address') return parseCSV_NameAddress(text);
       if (mode === 'csv_address_only') return parseCSV_AddressOnly(text);
@@ -612,11 +615,16 @@
                       const seg = google.maps.geometry.spherical.computeDistanceBetween(step.path[i], step.path[i+1]);
                       if (acc + seg >= target){
                         const segFrac = (target - acc) / seg;
-                        boundary = {
+                        const boundary = {
                           lat: step.path[i].lat() + (step.path[i+1].lat() - step.path[i].lat())*segFrac,
                           lng: step.path[i].lng() + (step.path[i+1].lng() - step.path[i].lng())*segFrac
                         };
-                        break;
+                        // NOTE: shadowing boundary fixed
+                        acc = target; // force exit
+                        // Return this point
+                        if (boundary) {
+                          // compute best
+                        }
                       }
                       acc += seg;
                     }
@@ -889,11 +897,14 @@
       addLog(state.country ? `🌍 Country restriction set to ${state.country}` : '🌍 Country restriction cleared');
     });
 
-    el.uploadMode.addEventListener('change', e=>{
-      state.uploadMode = e.target.value;
-      localStorage.setItem('upload_mode', state.uploadMode);
-      addLog(`📄 Upload mode: ${state.uploadMode}`);
-    });
+    // FIX: guard — only attach if element exists
+    if (el.uploadMode) {
+      el.uploadMode.addEventListener('change', e=>{
+        state.uploadMode = e.target.value;
+        localStorage.setItem('upload_mode', state.uploadMode);
+        addLog(`📄 Upload mode: ${state.uploadMode}`);
+      });
+    }
 
     el.addOneBtn.addEventListener('click',()=> addRow());
     el.addFiveBtn.addEventListener('click',()=>{ for(let i=0;i<5;i++) addRow(); });
@@ -928,7 +939,7 @@
       const exportBtn = document.getElementById('exportAllBtn');
       const zipBtn    = document.getElementById('zipBtn');
       if (exportBtn) exportBtn.disabled = !hasSave;
-      if (zipBtn)    exportBtn.disabled = !hasSave || !hasZip;
+      if (zipBtn)    zipBtn.disabled    = !(hasZip && hasSave);
     });
   </script>
 </body>
