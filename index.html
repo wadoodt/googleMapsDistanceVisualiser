@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Multi-Origin 15-Minute Road Isochrones</title>
-  <meta name="description" content="Upload or enter multiple places and calculate 15-minute road-aware isochrones for each using Google Maps Directions (Routes). Exports GeoJSON and a ZIP of all results."/>
+  <title>Multi-Origin 15-Minute Road Isochrones (CSV props passthrough)</title>
+  <meta name="description" content="Upload or enter multiple places and calculate 15-minute road-aware isochrones for each using Google Maps Directions (Routes). Exports GeoJSON and a ZIP of all results. CSVs with headers supported; extra columns are passed into GeoJSON properties."/>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     :root{
@@ -38,13 +38,14 @@
     .toolbar{display:flex;gap:8px;flex-wrap:wrap}
     .usagebar{position:sticky;bottom:0;margin-top:18px;background:#0b1220;color:#e5e7eb;border-radius:12px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 -6px 16px rgba(0,0,0,.08)}
     select.input{appearance:auto}
+    .prop-chip{font-size:11px;background:#eef2ff;color:#374151;border:1px solid #e5e7eb;border-radius:999px;padding:2px 6px}
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
       <h1>🛣️ Multi-Origin 15-Minute Road Isochrones</h1>
-      <p class="sub">Upload or enter many places → get a 15-minute driving boundary for each (same algorithm as your single-origin tool).</p>
+      <p class="sub">Upload or enter many places → get a 15-minute driving boundary for each (CSV headers supported; extra columns flow into GeoJSON).</p>
     </div>
 
     <div class="card" style="background:#fef3c7;border:1px solid #fbbf24">
@@ -85,7 +86,7 @@
               <option value="">No restriction</option>
               <option value="GB" selected>United Kingdom (GB)</option>
             </select>
-            <div class="small" style="margin-top:6px">When set, ambiguous place names are geocoded <b>only</b> within the selected country. Helpful to avoid e.g. Saint Petersburg (US) vs Saint Petersburg (RU). UK is selected by default.</div>
+            <div class="small" style="margin-top:6px">When set, ambiguous place names are geocoded <b>only</b> within the selected country.</div>
           </div>
 
           <div class="form-group">
@@ -97,22 +98,23 @@
               <label class="btn-ghost btn" for="fileInput">📁 Upload List</label>
               <input id="fileInput" type="file" accept=".txt,.csv,.json,.geojson" style="display:none"/>
 
-              <select id="uploadMode" class="input" style="max-width:320px">
+              $1
                 <option value="auto" selected>Auto-detect</option>
+                <option value="csv_with_headers">CSV: column names</option>
                 <option value="csv_name_address">CSV: name,address</option>
                 <option value="csv_address_only">CSV: address</option>
                 <option value="text_lines">Plain text: one per line</option>
                 <option value="text_name_address">Plain text: name | address</option>
-              </select>
+              $2
 
               <button id="clearListBtn" class="btn-ghost btn" type="button">🧹 Clear</button>
             </div>
-            <div class="small" style="margin-top:6px">Accepted formats: <b>JSON/GeoJSON</b> (auto), <b>CSV</b> with either <code>name,address</code> or <code>address</code> only (choose mode), or <b>plain text</b> (one address per line). Lat/Lng like <code>51.5,-0.12</code> also supported.</div>
+            <div class="small" style="margin-top:6px">CSV with headers supported. You can also pick <b>CSV: column names</b> in the dropdown to force header-aware parsing. First row must be column names. We'll detect <b>Name</b> and <b>Address</b> (or <i>Lat</i>/<i>Lng</i>) case‑insensitively; any other columns are passed through to GeoJSON properties.</div>
           </div>
 
           <div class="form-group">
             <table class="table">
-              <thead><tr><th style="width:34px">#</th><th>Name</th><th>Address (or <code>lat,lng</code>)</th><th></th></tr></thead>
+              <thead><tr><th style="width:34px">#</th><th>Name</th><th>Address (or <code>lat,lng</code>)</th><th>Props</th><th></th></tr></thead>
               <tbody id="rows"></tbody>
             </table>
             <div class="small" id="listStats">0 locations</div>
@@ -158,7 +160,8 @@
           <div class="small" style="line-height:1.6;color:var(--slate)">
             • Uses your single-origin algorithm per location: generates radial test destinations, requests driving routes, and finds the 15-minute boundary point along each route. <br>
             • Fills angular gaps, sorts points, draws polygons, and exports per-origin GeoJSON + a combined file. <br>
-            • All in the browser (static), suitable for GitHub Pages.
+            • All in the browser (static), suitable for GitHub Pages. <br>
+            • NEW: CSV headers with any number of columns. Unrecognized columns are attached to GeoJSON features as properties.
           </div>
         </div>
       </div>
@@ -187,10 +190,10 @@
       logs: [],
       apiCalls: 0,
       totalPoints: 0,
-      rows: [], // {name:'', address:'', lat:null, lng:null}
-      results: [], // per origin { name, origin, points[], polygon, markers[] }
+      rows: [], // DOM rows only
+      results: [], // per origin { name, origin, points[], polygon, markers[], props }
       palette: ['#10b981','#3b82f6','#f59e0b','#ef4444','#7c3aed','#14b8a6','#f97316','#eab308','#22c55e','#8b5cf6'],
-      country: 'GB', // ISO-3166-1 alpha-2. Default to UK as requested.
+      country: 'GB', // ISO-3166-1 alpha-2. Default to UK.
       uploadMode: 'auto',
     };
 
@@ -229,7 +232,7 @@
     const savedKey = localStorage.getItem('gmaps_api_key');
     if (savedKey){ state.apiKey = savedKey; el.apiKey.value = savedKey; addLog('API key loaded from local storage','success'); loadGoogleMaps(); }
 
-    // Load saved country pref if any
+    // Load saved country
     const savedCountry = localStorage.getItem('gmaps_country');
     if (savedCountry !== null) {
       state.country = savedCountry || '';
@@ -241,14 +244,10 @@
     if (savedUploadMode){ state.uploadMode = savedUploadMode; if (el.uploadMode) el.uploadMode.value = savedUploadMode; }
 
     // ---------- Utils ----------
-    
-    // ---- Polygon centroid in lat/lng using planar shoelace on (lng=x, lat=y)
     function centroidFromPath(pathArr){
-      // pathArr: array of google.maps.LatLng
       const pts = pathArr.map(ll => ({ x: ll.lng(), y: ll.lat() }));
       const n = pts.length;
       if (n < 3){
-        // Fallback: average of points
         const avg = pts.reduce((a,p)=>({x:a.x+p.x, y:a.y+p.y}), {x:0,y:0});
         return { lat: avg.y/n, lng: avg.x/n };
       }
@@ -261,17 +260,14 @@
         Cy += (pts[i].y + pts[j].y) * cross;
       }
       if (Math.abs(twiceArea) < 1e-12){
-        // Degenerate – fallback to average
         const avg = pts.reduce((a,p)=>({x:a.x+p.x, y:a.y+p.y}), {x:0,y:0});
         return { lat: avg.y/n, lng: avg.x/n };
       }
-      const area = twiceArea / 2;
       Cx /= (3 * twiceArea);
       Cy /= (3 * twiceArea);
       return { lat: Cy, lng: Cx };
     }
 
-    
     function addLog(message,type='info'){
       const timestamp = new Date().toLocaleTimeString();
       state.logs.push({message,type,timestamp});
@@ -291,10 +287,12 @@
       el.usageCost.textContent = `$${cost.toFixed(3)}`;
     }
 
-    function addRow(name = '', address = '') {
+    // ---------- Table rows ----------
+    function addRow(name = '', address = '', props = {}) {
       const idx = state.rows.length + 1;
 
       const tr = document.createElement('tr');
+      tr.dataset.props = JSON.stringify(props || {});
 
       const tdIdx = document.createElement('td');
       tdIdx.className = 'small';
@@ -314,6 +312,11 @@
       addrInput.value = address;
       tdAddr.appendChild(addrInput);
 
+      const tdProps = document.createElement('td');
+      tdProps.className = 'small';
+      const count = Object.keys(props||{}).length;
+      tdProps.innerHTML = count ? `<span class="prop-chip">${count} prop${count>1?'s':''}</span>` : '<span class="small" style="color:#94a3b8">—</span>';
+
       const tdRemove = document.createElement('td');
       const removeBtn = document.createElement('button');
       removeBtn.className = 'btn-ghost btn remove';
@@ -321,7 +324,7 @@
       removeBtn.textContent = '✖';
       tdRemove.appendChild(removeBtn);
 
-      tr.append(tdIdx, tdName, tdAddr, tdRemove);
+      tr.append(tdIdx, tdName, tdAddr, tdProps, tdRemove);
       el.rows.appendChild(tr);
 
       state.rows.push(tr);
@@ -339,7 +342,7 @@
       el.listStats.textContent = `${state.rows.length} locations`;
     }
 
-    // ---- Robust parsing helpers ----
+    // ---------- Robust parsing helpers ----------
     function stripBOM(s) { return s.replace(/^\uFEFF/, ''); }
     function unquote(s) {
       s = s.trim();
@@ -365,19 +368,13 @@
       fields.push(cur.trim());
       return fields;
     }
-    function dropHeaderIfPresent(rows) {
-      if (!rows.length) return rows;
-      const first = rows[0];
-      const looksLikeHeader =
-        /name/i.test(first.name || '') && /address|location/i.test(first.address || '');
-      return looksLikeHeader ? rows.slice(1) : rows;
-    }
+
     function parseLines(text){
       return text
         .split(/\r?\n/)
         .map(l=>stripBOM(l).trim())
         .filter(Boolean)
-        .map(addr=>({name:'', address:addr}));
+        .map(addr=>({name:'', address:addr, props:{}}));
     }
     function parseLinesNameAddress(text) {
       return text
@@ -390,10 +387,64 @@
           const name = m[1].trim();
           const address = m[2].trim();
           if (!address) return null;
-          return { name, address };
+          return { name, address, props:{} };
         })
         .filter(Boolean);
     }
+
+    // ---- NEW: CSV with header & passthrough props ----
+    function normalizeKey(k){
+      return String(k||'')
+        .replace(/\uFEFF/g,'')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g,' ');
+    }
+    function parseCSV_Generic(text){
+      const lines = text.split(/\r?\n/).filter(l=>l.trim().length>0);
+      if (!lines.length) return [];
+      const rows = lines.map(splitCsvLine).map(arr=>arr.map(unquote));
+      if (rows.length===0) return [];
+
+      const header = rows[0].map(normalizeKey);
+      const data = rows.slice(1);
+
+      // Try to identify columns
+      const colIdx = (preds)=> header.findIndex(h=>preds.some(p=>p.test(h)));
+      const nameIdx    = colIdx([/^(name|title)$/i]);
+      const addressIdx = colIdx([/^(address|addr|location|place)$/i]);
+      const latIdx     = colIdx([/^lat(itude)?$/i]);
+      const lngIdx     = colIdx([/^(lon|lng|long|longitude)$/i]);
+
+      // If header doesn't look like headers (i.e., no common matches), fall back later
+      const headerLooksValid = nameIdx>=0 || addressIdx>=0 || (latIdx>=0 && lngIdx>=0);
+      if (!headerLooksValid) return null; // signal to caller to try other heuristics
+
+      const out = [];
+      for (const row of data){
+        if (!row || row.every(v=>String(v||'').trim()==='')) continue;
+        const name = nameIdx>=0 ? row[nameIdx] : '';
+        let address = addressIdx>=0 ? row[addressIdx] : '';
+        if (!address && latIdx>=0 && lngIdx>=0){
+          const la = row[latIdx], lo = row[lngIdx];
+          if (la!==undefined && lo!==undefined && String(la).trim()!=='' && String(lo).trim()!==''){
+            address = `${la},${lo}`; // we reuse existing lat,lng flow
+          }
+        }
+        if (!address) continue; // must have address or lat/lng
+
+        const props = {};
+        header.forEach((key, i)=>{
+          if (i===nameIdx || i===addressIdx || i===latIdx || i===lngIdx) return;
+          const v = row[i];
+          if (v!==undefined && String(v).trim()!=='') props[rows[0][i]] = v; // original casing
+        });
+        out.push({ name, address, props });
+      }
+      return out;
+    }
+
+    // Legacy/explicit CSV parsers remain (no props passthrough)
     function parseCSV_NameAddress(text){
       const rows = text
         .split(/\r?\n/)
@@ -402,40 +453,46 @@
         .map(line=>{
           const parts = splitCsvLine(line).map(unquote);
           if (parts.length < 2) return null;
-          return { name: parts[0], address: parts.slice(1).join(',') };
+          return { name: parts[0], address: parts.slice(1).join(','), props:{} };
         })
         .filter(Boolean);
-      return dropHeaderIfPresent(rows);
+      // Drop header if looks like it
+      if (rows.length && /name/i.test(rows[0].name) && /address|location/i.test(rows[0].address)) rows.shift();
+      return rows;
     }
     function parseCSV_AddressOnly(text) {
       const rows = text
         .split(/\r?\n/)
         .map(l => stripBOM(l).trim())
         .filter(l => l.length > 0)
-        .map(line => ({ name: '', address: unquote(line) }));
-      return dropHeaderIfPresent(rows);
+        .map(line => ({ name: '', address: unquote(line), props:{} }));
+      return rows;
     }
+
     function parseCSV_Auto(text){
+      // Try generic header-aware parser first
+      const generic = parseCSV_Generic(text);
+      if (Array.isArray(generic)) return generic;
+
+      // Otherwise, simple heuristic: 1 = address, 2 = name,address, >=3 = name,rest→address
       const rows = text
         .split(/\r?\n/)
         .map(l=>l.trim())
         .filter(Boolean)
         .map(line=>{
           const parts = splitCsvLine(line).map(unquote);
-          if (parts.length===1) return { name:'', address:parts[0] };
-          if (parts.length===2) return { name:parts[0], address:parts[1] };
-          if (parts.length>=3) return { name:parts[0], address:parts.slice(1).join(',') };
+          if (parts.length===1) return { name:'', address:parts[0], props:{} };
+          if (parts.length===2) return { name:parts[0], address:parts[1], props:{} };
+          if (parts.length>=3) return { name:parts[0], address:parts.slice(1).join(','), props:{} };
           return null;
         })
         .filter(Boolean);
-      return dropHeaderIfPresent(rows);
+      if (rows.length && /name/i.test(rows[0].name) && /address|location/i.test(rows[0].address)) rows.shift();
+      return rows;
     }
 
-    async function parseFile(file, mode){
-      const text = await file.text();
-      mode = mode || state.uploadMode || 'auto';
-
-      // Mode-specific branches first
+    async function parseFile(file, mode){$1
+      if (mode === 'csv_with_headers') { const r = parseCSV_Generic(text); return Array.isArray(r) ? r : []; }
       if (mode === 'csv_name_address') return parseCSV_NameAddress(text);
       if (mode === 'csv_address_only') return parseCSV_AddressOnly(text);
       if (mode === 'text_lines') return parseLines(text);
@@ -446,26 +503,31 @@
         const data = JSON.parse(text);
         if (Array.isArray(data)){
           return data
-            .map(o=>({ name:o.name||'', address: o.address || (o.lat!=null&&o.lng!=null? `${o.lat},${o.lng}` : '') }))
+            .map(o=>({ name:o.name||'', address: o.address || (o.lat!=null&&o.lng!=null? `${o.lat},${o.lng}` : ''), props: (()=>{ const {name,address,lat,lng, ...rest} = o||{}; return rest; })() }))
             .filter(o=>o.address);
         }
         if (data && data.type && String(data.type).toLowerCase()==='featurecollection' && Array.isArray(data.features)){
           return data.features.map(f=>{
             const props = f.properties||{}; const g=f.geometry||{};
+            let address = '';
             if (g.type==='Point' && Array.isArray(g.coordinates)){
-              return { name: props.name||'', address:`${g.coordinates[1]},${g.coordinates[0]}` };
+              address = `${g.coordinates[1]},${g.coordinates[0]}`;
+            } else {
+              address = props.address || props.location || '';
             }
-            const addr = props.address || props.location || '';
-            return addr? {name:props.name||'', address:addr}: null;
+            if (!address) return null;
+            const { name, address:addr, location, ...rest } = props;
+            return { name: name || '', address, props: rest };
           }).filter(Boolean);
         }
       }catch{
         // not JSON; continue
       }
-      // Fallback to CSV auto heuristic
+      // Fallback to CSV auto heuristic (header-aware first)
       return parseCSV_Auto(text);
     }
 
+    // ---------- Geometry helpers ----------
     function haversineDest(origin, bearingDeg, distanceKm){
       const R=6371, br=bearingDeg*Math.PI/180, lat1=origin.lat*Math.PI/180, lng1=origin.lng*Math.PI/180, d=distanceKm/R;
       const lat2 = Math.asin(Math.sin(lat1)*Math.cos(d)+Math.cos(lat1)*Math.sin(d)*Math.cos(br));
@@ -473,13 +535,11 @@
       return { lat: lat2*180/Math.PI, lng: lng2*180/Math.PI };
     }
 
-    // ---------- De-duplicate by angle (±toleranceDeg), keep farthest ----------
     function dedupeByAngle(center, points, toleranceDeg = 5) {
       if (!points || points.length < 2) return points;
 
       const centerLL = new google.maps.LatLng(center.lat, center.lng);
 
-      // Annotate each point with its angle [0,360) and distance from center
       const annotated = points.map(p => {
         const ang = (Math.atan2(p.lng - center.lng, p.lat - center.lat) * 180 / Math.PI + 360) % 360;
         const dist = google.maps.geometry.spherical.computeDistanceBetween(
@@ -489,7 +549,6 @@
         return { p, ang, dist };
       }).sort((a, b) => a.ang - b.ang);
 
-      // Build clusters of points within tolerance by sweeping sorted angles
       const clusters = [];
       let cur = [annotated[0]];
       for (let i = 1; i < annotated.length; i++) {
@@ -504,7 +563,6 @@
       }
       clusters.push(cur);
 
-      // Handle wrap-around (last cluster and first cluster may be within tolerance)
       if (clusters.length > 1) {
         const firstCluster = clusters[0];
         const lastCluster = clusters[clusters.length - 1];
@@ -512,14 +570,12 @@
         const lastAng = lastCluster[lastCluster.length - 1].ang;
         const wrapDiff = (firstAng + 360) - lastAng;
         if (wrapDiff <= toleranceDeg) {
-          // Merge: keep order as last + first
           const merged = lastCluster.concat(firstCluster);
           clusters[0] = merged;
           clusters.pop();
         }
       }
 
-      // From each cluster, keep the farthest point from the center
       const kept = clusters.map(group => {
         let best = group[0];
         for (let i = 1; i < group.length; i++) {
@@ -625,24 +681,27 @@
       return { markers, polygon };
     }
 
+    // ---- merge props safely, letting tool-defined keys win ----
+    function mergeProps(extra, base){
+      return { ...(extra||{}), ...base };
+    }
+
     function toGeoJSONFeatureCollection(origins){
       const features = [];
       for (const o of origins){
+        const extra = o.props || {};
         if (o.polygon){
           const path = o.polygon.getPath().getArray().map(ll => [ll.lng(), ll.lat()]);
           if (path.length){
-            // polygon
             features.push({
               type:'Feature',
-              properties:{ type:'isochrone', minutes: state.timeLimit, name:o.name },
+              properties: mergeProps(extra, { type:'isochrone', minutes: state.timeLimit, name:o.name }),
               geometry:{ type:'Polygon', coordinates:[ [...path, path[0]] ] }
             });
-    
-            // centroid (centre)
             const c = centroidFromPath(o.polygon.getPath().getArray());
             features.push({
               type:'Feature',
-              properties:{ type:'centroid', minutes: state.timeLimit, name:o.name },
+              properties: mergeProps(extra, { type:'centroid', minutes: state.timeLimit, name:o.name }),
               geometry:{ type:'Point', coordinates:[c.lng, c.lat] }
             });
           }
@@ -650,21 +709,20 @@
         if (o.points?.length){
           features.push({
             type:'Feature',
-            properties:{ type:'boundary-points', name:o.name },
+            properties: mergeProps(extra, { type:'boundary-points', name:o.name }),
             geometry:{ type:'MultiPoint', coordinates:o.points.map(p=>[p.lng,p.lat]) }
           });
         }
         if (o.origin){
           features.push({
             type:'Feature',
-            properties:{ type:'origin', name:o.name },
+            properties: mergeProps(extra, { type:'origin', name:o.name }),
             geometry:{ type:'Point', coordinates:[o.origin.lng, o.origin.lat] }
           });
         }
       }
       return { type:'FeatureCollection', features };
     }
-
 
     function saveBlob(data, filename, mime){
       const blob = new Blob([data], {type:mime});
@@ -698,10 +756,8 @@
 
     async function geocodeOne(input){
       input = input.trim();
-      // lat,lng direct
       const m = input.match(/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/);
       if (m){ return { lat: parseFloat(m[1]), lng: parseFloat(m[2]) }; }
-      // address via geocoder with country restriction (if any)
       return new Promise((resolve)=>{
         const req = { address: input };
         if (state.country) {
@@ -716,7 +772,7 @@
       });
     }
 
-    async function calculateForOrigin({name, origin, color}){
+    async function calculateForOrigin({name, origin, color, props}){
       addLog(`▶️ ${name||'Origin'}: generating test destinations…`);
       const distances=[10,20,30,40];
       const angles=[0,30,60,90,120,150,180,210,240,270,300,330];
@@ -736,7 +792,6 @@
         extra.forEach(p=>points.push(p));
       }
 
-      // Deduplicate by angle within ±5° (keep farthest)
       const before = points.length;
       let filtered = dedupeByAngle(origin, points, 5);
       const removed = before - filtered.length;
@@ -747,7 +802,7 @@
 
       state.totalPoints += points.length; updateStats();
       const drawn = drawOriginResult(origin, color, name, points);
-      return { name, origin, points, polygon: drawn.polygon, markers: drawn.markers, color };
+      return { name, origin, points, polygon: drawn.polygon, markers: drawn.markers, color, props };
     }
 
     async function runCalculation(){
@@ -758,7 +813,8 @@
         // Collect inputs
         const items = [...el.rows.querySelectorAll('tr')].map(tr=>({
           name: tr.querySelector('.name').value.trim(),
-          address: tr.querySelector('.address').value.trim()
+          address: tr.querySelector('.address').value.trim(),
+          props: (()=>{ try { return JSON.parse(tr.dataset.props||'{}'); } catch { return {}; } })()
         })).filter(x=>x.address);
         if (!items.length){ addLog('Add at least one location.','warning'); return; }
 
@@ -772,7 +828,7 @@
         for (const it of items){
           const loc = await geocodeOne(it.address);
           if (!loc){ addLog(`❌ Geocode failed for: ${it.address}`,'error'); continue; }
-          origins.push({ name: it.name||it.address, origin: loc });
+          origins.push({ name: it.name||it.address, origin: loc, props: it.props||{} });
         }
         if (!origins.length){ addLog('No valid origins to process.','error'); return; }
 
@@ -781,12 +837,12 @@
         origins.forEach(o=> bounds.extend(o.origin));
         state.map.fitBounds(bounds);
 
-        // Run per origin sequentially (easier on quota)
+        // Run per origin sequentially
         let idx=0;
         for (const o of origins){
           const color = state.palette[idx % state.palette.length]; idx++;
           const m = new google.maps.Marker({ position:o.origin, map:state.map, title:o.name, icon:{path:google.maps.SymbolPath.CIRCLE, scale:8, fillColor:color, fillOpacity:1, strokeColor:'#fff', strokeWeight:2}});
-          const res = await calculateForOrigin({name:o.name, origin:o.origin, color});
+          const res = await calculateForOrigin({name:o.name, origin:o.origin, color, props:o.props});
           res.markers.push(m);
           state.results.push(res);
         }
@@ -845,11 +901,10 @@
 
     el.fileInput.addEventListener('change', async (e) => {
       const file = e.target.files?.[0]; if (!file) return;
-      // Clear existing rows (optional)
       el.rows.innerHTML = ''; state.rows = []; renumberRows();
 
       const list = await parseFile(file, state.uploadMode);
-      list.forEach(item => addRow(item.name || '', item.address || ''));
+      list.forEach(item => addRow(item.name || '', item.address || '', item.props || {}));
       addLog(`📥 Loaded ${list.length} from file (${state.uploadMode})`, 'success');
       e.target.value = '';
     });
@@ -863,8 +918,8 @@
     el.fullscreenBtn.addEventListener('click',()=>{ const card = el.mapDiv.parentElement; if (!document.fullscreenElement){ (card.requestFullscreen ? card.requestFullscreen() : el.mapDiv.requestFullscreen?.()); } else { document.exitFullscreen?.(); }});
 
     // Pre-populate a couple of rows for convenience
-    addRow('London','London, UK');
-    addRow('Manchester','Manchester, UK');
+    addRow('London','London, UK', {region:'England'});
+    addRow('Manchester','Manchester, UK', {region:'England'});
 
     // Disable export buttons if libs missing
     document.addEventListener('DOMContentLoaded', () => {
@@ -873,7 +928,7 @@
       const exportBtn = document.getElementById('exportAllBtn');
       const zipBtn    = document.getElementById('zipBtn');
       if (exportBtn) exportBtn.disabled = !hasSave;
-      if (zipBtn)    zipBtn.disabled    = !(hasZip && hasSave);
+      if (zipBtn)    exportBtn.disabled = !hasSave || !hasZip;
     });
   </script>
 </body>
