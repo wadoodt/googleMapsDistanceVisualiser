@@ -454,40 +454,51 @@
       return { lat: lat2*180/Math.PI, lng: lng2*180/Math.PI };
     }
 
-    // ---- NEW: de-dup + cluster helpers ----
+    // ---- NEW: angular clustering helpers (5° bins) ----
     function latLng(obj){ return new google.maps.LatLng(obj.lat, obj.lng); }
 
-    function dedupeAndCluster(points, center, withinMeters = 10){
-      if (!points?.length) return [];
-      const cLL = latLng(center);
-      const clusters = []; // each: {repIndex, bestPoint, bestDistFromCenter}
-      const reps = []; // representative LatLng for distance checks
-
-      for (const p of points){
-        if (!isFinite(p.lat) || !isFinite(p.lng)) continue;
-        const pLL = latLng(p);
-        let assigned = false;
-        for (let i=0;i<reps.length;i++){
-          const d = google.maps.geometry.spherical.computeDistanceBetween(pLL, reps[i]);
-          if (d <= withinMeters){
-            // Decide which point to keep in this cluster: furthest from center
-            const distFromCenter = google.maps.geometry.spherical.computeDistanceBetween(pLL, cLL);
-            if (distFromCenter > clusters[i].bestDistFromCenter){
-              clusters[i].bestPoint = p; clusters[i].bestDistFromCenter = distFromCenter; reps[i] = pLL;
-            }
-            assigned = true; break;
-          }
-        }
-        if (!assigned){
-          const distFromCenter = google.maps.geometry.spherical.computeDistanceBetween(pLL, cLL);
-          clusters.push({ bestPoint: p, bestDistFromCenter: distFromCenter });
-          reps.push(pLL);
-        }
-      }
-      return clusters.map(c=>c.bestPoint);
+    function angleDeg(p, c){
+      // 0..360 where 0 = due north, increasing clockwise (consistent with prior atan2 ordering)
+      return (Math.atan2(p.lng - c.lng, p.lat - c.lat) * 180 / Math.PI + 360) % 360;
     }
 
-    async function testRoute(origin, destination){
+    function distMeters(p, c){
+      return google.maps.geometry.spherical.computeDistanceBetween(latLng(p), latLng(c));
+    }
+
+    // Cluster points by bearing: any points within `windowDeg` degrees collapse to the furthest-from-centre
+    function clusterByAngle(points, center, windowDeg = 5){
+      if (!points || points.length === 0) return [];
+      const arr = points.map(p=>({ p, ang: angleDeg(p, center), d: distMeters(p, center) }))
+                        .sort((a,b)=> a.ang - b.ang);
+      const clusters = [];
+      let cur = { start: arr[0].ang, best: arr[0].p, bestD: arr[0].d };
+      for (let i=1;i<arr.length;i++){
+        const a = arr[i];
+        if (a.ang - cur.start <= windowDeg){
+          if (a.d > cur.bestD){ cur.best = a.p; cur.bestD = a.d; }
+        } else {
+          clusters.push(cur);
+          cur = { start: a.ang, best: a.p, bestD: a.d };
+        }
+      }
+      clusters.push(cur);
+      // Handle wrap-around: last and first may be within window across 360° boundary
+      if (clusters.length > 1){
+        const first = clusters[0], last = clusters[clusters.length-1];
+        const circDiff = (first.start + 360) - last.start; // degrees between last->first around circle
+        if (circDiff <= windowDeg){
+          const keepFirst = first.bestD >= last.bestD;
+          const merged = keepFirst ? first : last;
+          merged.start = last.start; // keep lower start on circle for ordering
+          clusters[0] = merged;
+          clusters.pop();
+        }
+      }
+      return clusters.map(c=>c.best);
+    }
+
+    async function testRoute(origin, destination)(origin, destination){
       return new Promise((resolve)=>{
         const req={ origin, destination, travelMode: google.maps.TravelMode.DRIVING, unitSystem: google.maps.UnitSystem.METRIC, provideRouteAlternatives:true };
         state.directionsService.route(req,(r,status)=>{
@@ -673,11 +684,11 @@
         const extra = await fillGaps(origin, points); extra.forEach(p=>points.push(p));
       }
 
-      // NEW: de-duplicate/cluster points within 10m, keep furthest from centre
+      // NEW: angular de-duplication — collapse points within 5° bearing, keep furthest from centre
       const before = points.length;
-      const uniq = dedupeAndCluster(points, origin, 10);
+      const uniq = clusterByAngle(points, origin, 5);
       const removed = before - uniq.length;
-      if (removed>0) addLog(`🧽 ${name||'Origin'}: removed ${removed} near-duplicate point(s) (≤10m), kept furthest from centre.`);
+      if (removed>0) addLog(`🧽 ${name||'Origin'}: removed ${removed} points by 5° angular clustering (kept furthest).`);
 
       state.totalPoints += uniq.length; updateStats();
       const drawn = drawOriginResult(origin, color, name, uniq);
@@ -808,3 +819,4 @@
   </script>
 </body>
 </html>
+
