@@ -330,15 +330,31 @@
         .filter(Boolean);
     }
 
-    function parseCSV_NameAddress(text){
-      return text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(line=>{
-        const parts = line.split(',').map(s=>s.trim());
-        if (parts.length < 2) return null; // requires at least 2 columns
-        return { name: parts[0], address: parts.slice(1).join(',') }; // allow commas in address beyond first
-      }).filter(Boolean);
+    function dropHeaderIfPresent(rows) {
+      if (!rows.length) return rows;
+      const first = rows[0];
+      const looksLikeHeader = /name/i.test(first.name || '') && /address|location/i.test(first.address || '');
+      return looksLikeHeader ? rows.slice(1) : rows;
     }
 
-    function dropHeaderIfPresent(rows) {
+    // Robust CSV (name,address) with quotes support
+    function parseCSV_NameAddress(text) {
+      const parsedRows = text
+        .split(/
+?
+/)
+        .map(l => l.trim())
+        .filter(Boolean)
+        .map(line => {
+          const parts = splitCsvLine(line);
+          if (parts.length < 2) return null;
+          return { name: parts[0], address: parts.slice(1).join(',') };
+        })
+        .filter(Boolean);
+      return dropHeaderIfPresent(parsedRows);
+    }
+
+    function stripBOM(s) {(rows) {
       if (!rows.length) return rows;
       const first = rows[0];
       const looksLikeHeader =
@@ -374,11 +390,15 @@
     }
     
     function parseCSV_AddressOnly(text) {
-      return text
-        .split(/\r?\n/)
+      const parsedRows = text
+        .split(/
+?
+/)
         .map(l => stripBOM(l).trim())
         .filter(l => l.length > 0)
         .map(line => ({ name: '', address: unquote(line) }));
+      return dropHeaderIfPresent(parsedRows);
+    }));
 
       return dropHeaderIfPresent(parsedRows);
     }
@@ -405,9 +425,22 @@
 
 
     function parseCSV_Auto(text){
-      return text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean).map(line=>{
-        const parts = line.split(',').map(s=>s.trim());
-        if (parts.length===1) return { name:'', address:parts[0] };
+      const parsedRows = text
+        .split(/
+?
+/)
+        .map(l=>l.trim())
+        .filter(Boolean)
+        .map(line=>{
+          const parts = splitCsvLine(line);
+          if (parts.length===1) return { name:'', address:parts[0] };
+          if (parts.length===2) return { name:parts[0], address:parts[1] };
+          if (parts.length>=3) return { name:parts[0], address: parts.slice(1).join(',') };
+          return null;
+        })
+        .filter(Boolean);
+      return dropHeaderIfPresent(parsedRows);
+    };
         if (parts.length===2) return { name:parts[0], address:parts[1] };
         if (parts.length>=3) return { name:parts[0], address:`${parts[1]},${parts[2]}` };
         return null;
@@ -758,6 +791,15 @@
       state.directionsService = new google.maps.DirectionsService();
       state.geocoder = new google.maps.Geocoder();
     }
+
+    // ---------- Global error taps ----------
+    window.addEventListener('error', (e)=>{
+      try{ addLog(`JS error: ${e.message}`,'error'); }catch(err){ /* ignore */ }
+    });
+    window.addEventListener('unhandledrejection', (e)=>{
+      const msg = (e && e.reason && (e.reason.message || e.reason)) || 'Unknown promise rejection';
+      try{ addLog(`Promise rejection: ${msg}`,'error'); }catch(err){ /* ignore */ }
+    });
 
     // ---------- Events ----------
     el.toggleApiKey.addEventListener('click',()=>{
