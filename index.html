@@ -241,6 +241,37 @@
     if (savedUploadMode){ state.uploadMode = savedUploadMode; if (el.uploadMode) el.uploadMode.value = savedUploadMode; }
 
     // ---------- Utils ----------
+    
+    // ---- Polygon centroid in lat/lng using planar shoelace on (lng=x, lat=y)
+    function centroidFromPath(pathArr){
+      // pathArr: array of google.maps.LatLng
+      const pts = pathArr.map(ll => ({ x: ll.lng(), y: ll.lat() }));
+      const n = pts.length;
+      if (n < 3){
+        // Fallback: average of points
+        const avg = pts.reduce((a,p)=>({x:a.x+p.x, y:a.y+p.y}), {x:0,y:0});
+        return { lat: avg.y/n, lng: avg.x/n };
+      }
+      let twiceArea = 0, Cx = 0, Cy = 0;
+      for (let i = 0; i < n; i++){
+        const j = (i+1) % n;
+        const cross = pts[i].x*pts[j].y - pts[j].x*pts[i].y;
+        twiceArea += cross;
+        Cx += (pts[i].x + pts[j].x) * cross;
+        Cy += (pts[i].y + pts[j].y) * cross;
+      }
+      if (Math.abs(twiceArea) < 1e-12){
+        // Degenerate – fallback to average
+        const avg = pts.reduce((a,p)=>({x:a.x+p.x, y:a.y+p.y}), {x:0,y:0});
+        return { lat: avg.y/n, lng: avg.x/n };
+      }
+      const area = twiceArea / 2;
+      Cx /= (3 * twiceArea);
+      Cy /= (3 * twiceArea);
+      return { lat: Cy, lng: Cx };
+    }
+
+    
     function addLog(message,type='info'){
       const timestamp = new Date().toLocaleTimeString();
       state.logs.push({message,type,timestamp});
@@ -595,21 +626,45 @@
     }
 
     function toGeoJSONFeatureCollection(origins){
-      const features=[];
+      const features = [];
       for (const o of origins){
         if (o.polygon){
-          const path = o.polygon.getPath().getArray().map(ll=>[ll.lng(), ll.lat()]);
-          if (path.length){ features.push({type:'Feature', properties:{type:'isochrone', minutes: state.timeLimit, name:o.name}, geometry:{type:'Polygon', coordinates:[ [...path, path[0]] ]}}); }
+          const path = o.polygon.getPath().getArray().map(ll => [ll.lng(), ll.lat()]);
+          if (path.length){
+            // polygon
+            features.push({
+              type:'Feature',
+              properties:{ type:'isochrone', minutes: state.timeLimit, name:o.name },
+              geometry:{ type:'Polygon', coordinates:[ [...path, path[0]] ] }
+            });
+    
+            // centroid (centre)
+            const c = centroidFromPath(o.polygon.getPath().getArray());
+            features.push({
+              type:'Feature',
+              properties:{ type:'centroid', minutes: state.timeLimit, name:o.name },
+              geometry:{ type:'Point', coordinates:[c.lng, c.lat] }
+            });
+          }
         }
         if (o.points?.length){
-          features.push({type:'Feature', properties:{type:'boundary-points', name:o.name}, geometry:{type:'MultiPoint', coordinates:o.points.map(p=>[p.lng,p.lat])}});
+          features.push({
+            type:'Feature',
+            properties:{ type:'boundary-points', name:o.name },
+            geometry:{ type:'MultiPoint', coordinates:o.points.map(p=>[p.lng,p.lat]) }
+          });
         }
         if (o.origin){
-          features.push({type:'Feature', properties:{type:'origin', name:o.name}, geometry:{type:'Point', coordinates:[o.origin.lng, o.origin.lat]}});
+          features.push({
+            type:'Feature',
+            properties:{ type:'origin', name:o.name },
+            geometry:{ type:'Point', coordinates:[o.origin.lng, o.origin.lat] }
+          });
         }
       }
       return { type:'FeatureCollection', features };
     }
+
 
     function saveBlob(data, filename, mime){
       const blob = new Blob([data], {type:mime});
